@@ -1,129 +1,170 @@
-/**
- * Shared code between client and server
- * Useful to share types between client and server
- */
-
-export interface DemoResponse {
-  message: string;
-}
-
-// Auth types
 export interface LoginRequest {
   email: string;
   password: string;
 }
 
 export interface LoginResponse {
-  success: boolean;
-  token?: string;
-  user?: {
-    id: string;
-    email: string;
-    name: string;
-  };
-  error?: string;
+  token: string;
+  user: { id: number; name: string; email: string; role: string };
 }
 
-// Dashboard types
-export interface DashboardStats {
-  totalOrders: number;
-  pendingOrders: number;
-  completedOrders: number;
-  totalCustomers: number;
-  totalRevenue: number;
-  revenueThisMonth: number;
+export interface ApiError {
+  error: string;
 }
 
-// Order types
-export interface Order {
-  id: string;
-  orderNumber: string;
-  customerId: string;
-  customerName: string;
-  customerPhone: string;
-  orderType: "laundry" | "dry-clean" | "mixed";
-  status: "pending" | "processing" | "ready" | "delivered";
-  items: OrderItem[];
-  totalAmount: number;
-  createdAt: string;
-  completionDate?: string;
-  notes?: string;
+export interface HeroData {
+  tag: string;
+  name: string;
+  role: string;
+  desc: string;
+  years: string;
+  projects: string;
+  clients: string;
+  avatar: string;
+  cta1: string;
+  cta2: string;
+  cvUrl: string;
+  showStats: boolean;
+  showStack: boolean;
+  typing: boolean;
+  floatCards: boolean;
+  accent: string;
+  techStack: string;
 }
 
-export interface OrderItem {
-  id: string;
-  serviceId: string;
-  serviceName: string;
-  quantity: number;
-  price: number;
-  subtotal: number;
+export interface AboutData {
+  title: string;
+  tag: string;
+  bio: string;
+  longBio: string;
+  location: string;
+  availability: string;
+  email: string;
+  phone: string;
+  resume: string;
+  image: string;
+  statValue: string;
+  statLabel: string;
+  languages: string;
+  interests: string;
 }
 
-// Service types
+export interface ListItem {
+  id?: number;
+  a: string;
+  b: string;
+  c: string;
+  d?: string;
+}
+
+export interface Skill {
+  id?: number;
+  name: string;
+  level: number;
+  category: string;
+  icon: string;
+}
+
+export interface Project {
+  id?: number;
+  title: string;
+  tag: string;
+  img: string;
+  desc: string;
+  live: string;
+  repo: string;
+  tech: string;
+  featured: boolean;
+}
+
 export interface Service {
-  id: string;
-  name: string;
-  description?: string;
-  category: "washing" | "ironing" | "dry-clean" | "other";
-  price: number;
-  enabled: boolean;
+  id?: number;
+  icon: string;
+  title: string;
+  desc: string;
+  price: string;
+  visible: boolean;
 }
 
-// Customer types
-export interface Customer {
-  id: string;
-  name: string;
-  email?: string;
-  phone: string;
-  address?: string;
-  totalOrders: number;
-  totalSpent: number;
-  createdAt: string;
-}
-
-// Staff types
-export interface Staff {
-  id: string;
+export interface Message {
+  id?: number;
   name: string;
   email: string;
-  phone: string;
-  role: "manager" | "staff" | "operator";
-  permissions: string[];
-  joinDate: string;
-  active: boolean;
+  subject: string;
+  preview: string;
+  body: string;
+  time: string;
+  unread: boolean;
 }
 
-// Report types
-export interface DailyReport {
-  date: string;
-  totalOrders: number;
-  completedOrders: number;
-  totalRevenue: number;
-  expenses?: number;
-}
-
-export interface MonthlyReport {
-  month: string;
-  year: number;
-  totalOrders: number;
-  completedOrders: number;
-  totalRevenue: number;
-  totalExpenses: number;
-  profit: number;
-}
-
-// Settings types
-export interface ShopSettings {
-  shopName: string;
-  logo?: string;
-  openingHours: {
-    [key: string]: {
-      open: string;
-      close: string;
-      closed: boolean;
-    };
-  };
-  phone: string;
+export interface AdminUser {
+  id?: number;
+  name: string;
   email: string;
-  address: string;
+  role: string;
+  status: string;
+  last: string;
+  avatar: string;
+}
+
+export interface SmtpConfig {
+  provider: string;
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  fromName: string;
+  fromEmail: string;
+  replyTo: string;
+  secure: boolean;
+}
+
+export interface AppearanceConfig {
+  mode: "dark" | "light" | "system";
+  palette: number;
+  radius: number;
+  density: string;
+  bgAnim: string;
+  animSpeed: number;
+  animIntensity: number;
+  parallax: boolean;
+  reducedMotion: boolean;
+  scrollReveal: boolean;
+  hover3d: boolean;
+}
+
+export interface SiteSettings {
+  accountName: string;
+  accountEmail: string;
+  siteTitle: string;
+  metaDescription: string;
+  keywords: string;
+  emailNotifications: boolean;
+  showAnalyticsWidget: boolean;
+  allowIndexing: boolean;
+}
+
+export interface CustomizationConfig {
+  logoText: string;
+  favicon: string;
+  ogImageUrl: string;
+  tagline: string;
+  navigation: { label: string; visible: boolean }[];
+  backgroundStyle: string;
+  animationSpeed: number;
+  floatingCards: boolean;
+  typingAnimation: boolean;
+  socialLinks: { icon: string; label: string; url: string }[];
+  customCss: string;
+  customHeadScripts: string;
+}
+
+export interface DashboardData {
+  stats: { label: string; value: string; delta: string; icon: string }[];
+  sections: { id: number; key: string; title: string; icon: string; subtitle: string; published: boolean }[];
+  counts: { projects: number; messages: number; unread: number };
+}
+
+export interface AnalyticsData {
+  stats: { label: string; value: string; delta: string }[];
 }

@@ -57,8 +57,6 @@ export function Field({
   );
 }
 
-export const inputCls =
-  "w-full bg-surface-variant/40 border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface focus:outline-none focus:border-primary/50 transition";
 
 /* ── Save button ── */
 export function SaveBtn({

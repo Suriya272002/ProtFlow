@@ -1,26 +1,8 @@
-import knex from "knex";
 import "dotenv/config";
-
-const db = knex({
-  client: "mysql2",
-  connection: {
-    host: process.env.DB_HOST || "localhost",
-    port: parseInt(process.env.DB_PORT || "3306"),
-    user: process.env.DB_USER || "root",
-    password: process.env.DB_PASSWORD || "",
-    database: process.env.DB_NAME || "landery_shop",
-  },
-  migrations: {
-    extension: "ts",
-    directory: "./server/migrations",
-  },
-  seeds: {
-    extension: "ts",
-    directory: "./server/seeds",
-  },
-});
+import { getDb, closeDb } from "../server/db";
 
 async function main() {
+  const db = getDb();
   const action = process.argv[2] || "migrate";
   try {
     if (action === "migrate") {
@@ -45,7 +27,7 @@ async function main() {
     console.error("Error:", err);
     process.exit(1);
   } finally {
-    await db.destroy();
+    await closeDb();
   }
 }
 

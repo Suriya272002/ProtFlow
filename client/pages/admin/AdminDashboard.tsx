@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ROUTES } from "../../lib/routes";
+import { adminApi, isAuthed, setToken } from "../../lib/admin-api";
+import { useBackendCrud, useSingleton } from "../../hooks/useBackendCrud";
 
 const Icon = ({ name, className = "", fill = false }: { name: string; className?: string; fill?: boolean }) => (
   <span className={`material-symbols-outlined ${className}`} style={fill ? { fontVariationSettings: "'FILL' 1" } : undefined}>
@@ -61,10 +63,15 @@ export function AdminDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
+  const [unreadCount, setUnreadCount] = useState(0);
+
   useEffect(() => {
-    setAuthed(localStorage.getItem("admin_authed") === "1");
+    setAuthed(isAuthed());
     setCollapsed(localStorage.getItem("admin_sidebar_collapsed") === "1");
-  }, []);
+    if (isAuthed()) {
+      adminApi.getDashboard().then((d) => setUnreadCount(d.counts.unread)).catch(() => {});
+    }
+  }, [authed]);
 
   const toggleCollapsed = () => {
     setCollapsed((c) => {
@@ -74,11 +81,9 @@ export function AdminDashboard() {
     });
   };
 
-  const signIn = () => {
-    localStorage.setItem("admin_authed", "1");
-    setAuthed(true);
-  };
+  const signIn = () => setAuthed(true);
   const signOut = () => {
+    setToken(null);
     localStorage.removeItem("admin_authed");
     setAuthed(false);
   };
@@ -135,7 +140,7 @@ export function AdminDashboard() {
           {!collapsed && <div className="px-3 mt-5 mb-1 text-[10px] font-bold text-on-surface-variant uppercase tracking-widest opacity-50">Operations</div>}
           {collapsed && <div className="my-3 mx-3 border-t border-white/10" />}
           {NAV_OPS.map((n) => (
-            <SidebarNavItem key={n.label} icon={n.icon} label={n.label} badge={n.badge} active={active === n.label} collapsed={collapsed} onClick={() => pick(n.label)} />
+            <SidebarNavItem key={n.label} icon={n.icon} label={n.label} badge={n.label === "Messages" && unreadCount > 0 ? String(unreadCount) : n.badge} active={active === n.label} collapsed={collapsed} onClick={() => pick(n.label)} />
           ))}
         </div>
         <div className={`mt-auto ${collapsed ? "px-2" : "px-6"} py-4 border-t border-outline-variant/30 space-y-2`}>
@@ -155,10 +160,10 @@ export function AdminDashboard() {
         {active === "Dashboard" && <DashboardPage />}
         {active === "Hero Section" && <HeroEditor />}
         {active === "About" && <AboutEditor />}
-        {active === "Education" && <ListEditor title="Education" icon="school" items={EDUCATION} columns={["Degree", "Institution", "Year"]} />}
+        {active === "Education" && <ListEditor title="Education" icon="school" columns={["Degree", "Institution", "Year"]} api={{ list: adminApi.listEducation, create: adminApi.createEducation, update: adminApi.updateEducation, remove: adminApi.deleteEducation }} />}
         {active === "Skills" && <SkillsEditor />}
         {active === "Projects" && <ProjectsEditor />}
-        {active === "Experience" && <ListEditor title="Experience" icon="history" items={EXPERIENCE} columns={["Role", "Company", "Period"]} />}
+        {active === "Experience" && <ListEditor title="Experience" icon="history" columns={["Role", "Company", "Period"]} api={{ list: adminApi.listExperience, create: adminApi.createExperience, update: adminApi.updateExperience, remove: adminApi.deleteExperience }} />}
         {active === "Services" && <ServicesEditor />}
         {active === "Messages" && <MessagesPage />}
         {active === "Users" && <UsersPage />}
@@ -188,13 +193,24 @@ function AdminLogin({ onSignIn }: { onSignIn: () => void }) {
   const [password, setPassword] = useState("admin");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
-  const submit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && password.length >= 3) {
-      setError("");
-      onSignIn();
-    } else {
+    if (!email || password.length < 3) {
       setError("Enter a valid email and password.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await adminApi.login({ email, password });
+      setToken(res.token);
+      localStorage.setItem("admin_authed", "1");
+      onSignIn();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoading(false);
     }
   };
   return (
@@ -233,11 +249,11 @@ function AdminLogin({ onSignIn }: { onSignIn: () => void }) {
               <a href="#" className="text-primary hover:underline">Forgot password?</a>
             </div>
             {error && <p className="text-error text-sm">{error}</p>}
-            <button type="submit" className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center justify-center gap-2">
-              <Icon name="login" className="text-[18px]" /> Sign In
+            <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center justify-center gap-2 disabled:opacity-60">
+              <Icon name="login" className="text-[18px]" /> {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
-          <div className="text-center text-xs text-on-surface-variant opacity-60">Demo: any email + password (min 3 chars)</div>
+          <div className="text-center text-xs text-on-surface-variant opacity-60">Default: admin@portfolio.dev / admin</div>
         </div>
       </div>
     </div>
@@ -248,13 +264,12 @@ function AdminLogin({ onSignIn }: { onSignIn: () => void }) {
 type AdminUser = { id?: number | string; name: string; email: string; role: string; status: string; last: string; avatar: string };
 
 function UsersPage() {
-  const crud = useCrud<AdminUser>([
-    { name: "Alex Morgan", email: "alex@morgan.dev", role: "Owner", status: "Active", last: "Just now", avatar: "A" },
-    { name: "Sarah Williams", email: "sarah@studio.io", role: "Editor", status: "Active", last: "2h ago", avatar: "S" },
-    { name: "David Chen", email: "david@vrlabs.com", role: "Viewer", status: "Active", last: "1d ago", avatar: "D" },
-    { name: "Elena Rodriguez", email: "elena@designweek.org", role: "Editor", status: "Invited", last: "—", avatar: "E" },
-    { name: "Marcus Kim", email: "marcus@startup.co", role: "Viewer", status: "Suspended", last: "5d ago", avatar: "M" },
-  ]);
+  const crud = useBackendCrud({
+    list: adminApi.listUsers,
+    create: adminApi.createUser,
+    update: adminApi.updateUser,
+    remove: adminApi.deleteUser,
+  });
   const blank: AdminUser = { name: "", email: "", role: "Viewer", status: "Invited", last: "—", avatar: "?" };
   const roleColor: Record<string, string> = { Owner: "primary", Editor: "secondary-fixed", Viewer: "tertiary" };
   const statusColor: Record<string, string> = { Active: "secondary-fixed", Invited: "primary", Suspended: "error" };
@@ -305,7 +320,7 @@ function UsersPage() {
         ))}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="person" title={crud.mode === "view" ? "User Details" : crud.mode === "edit" ? "Edit User" : "Invite User"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="person" title={crud.mode === "view" ? "User Details" : crud.mode === "edit" ? "Edit User" : "Invite User"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="space-y-5">
             <div className="flex items-center gap-4">
@@ -361,10 +376,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls = "w-full bg-surface-variant/40 border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface focus:outline-none focus:border-primary/50 transition";
 
-function SaveBtn({ onClick, label = "Save Changes" }: { onClick?: () => void; label?: string }) {
+function SaveBtn({ onClick, label = "Save Changes", saving, saved }: { onClick?: () => void; label?: string; saving?: boolean; saved?: boolean }) {
   return (
-    <button onClick={onClick} className="bg-primary text-on-primary font-bold px-6 py-3 rounded-full glow-primary hover:scale-105 transition-transform flex items-center gap-2">
-      <Icon name="save" className="text-[18px]" /> {label}
+    <button onClick={onClick} disabled={saving} className="bg-primary text-on-primary font-bold px-6 py-3 rounded-full glow-primary hover:scale-105 transition-transform flex items-center gap-2 disabled:opacity-60">
+      <Icon name="save" className="text-[18px]" /> {saved ? "Saved!" : saving ? "Saving..." : label}
     </button>
   );
 }
@@ -442,12 +457,12 @@ function DetailRow({ label, value, full = false }: { label: string; value: React
   );
 }
 
-function ModalFooter({ mode, onClose, onSave }: { mode: ModalMode; onClose: () => void; onSave?: () => void }) {
+function ModalFooter({ mode, onClose, onSave, saving }: { mode: ModalMode; onClose: () => void; onSave?: () => void; saving?: boolean }) {
   if (mode === "view") return <button onClick={onClose} className="px-5 py-2.5 rounded-xl bg-white/5 text-on-surface font-bold hover:bg-white/10">Close</button>;
   return (
     <>
       <button onClick={onClose} className="px-5 py-2.5 rounded-xl bg-white/5 text-on-surface font-bold hover:bg-white/10">Cancel</button>
-      <button onClick={() => { onSave?.(); onClose(); }} className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center gap-2"><Icon name="save" className="text-[18px]" />{mode === "create" ? "Create" : "Save"}</button>
+      <button disabled={saving} onClick={() => onSave?.()} className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center gap-2 disabled:opacity-60"><Icon name="save" className="text-[18px]" />{saving ? "Saving..." : mode === "create" ? "Create" : "Save"}</button>
     </>
   );
 }
@@ -473,22 +488,35 @@ function useCrud<T extends { id?: string | number }>(initial: T[]) {
 
 /* ============== Dashboard ============== */
 function DashboardPage() {
+  const [data, setData] = useState<{ stats: { label: string; value: string; delta: string; icon: string; color?: string; sub?: string }[]; sections: { id: number; title: string; icon: string; subtitle: string; published: boolean; color?: string }[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.getDashboard()
+      .then((d) => {
+        const colors = ["primary", "secondary-fixed", "tertiary", "primary"];
+        setData({
+          stats: d.stats.map((s, i) => ({ ...s, color: colors[i], sub: i === 0 ? "vs last month" : i === 1 ? "new uploads" : i === 2 ? "leads generated" : "hiring rate" })),
+          sections: d.sections.map((s, i) => ({ ...s, color: colors[i % colors.length] })),
+        });
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-on-surface-variant">Loading dashboard...</p>;
+  if (!data) return <p className="text-error">Failed to load dashboard</p>;
+
   return (
     <>
       <PageHeader
         title="Dashboard Overview"
-        subtitle="Welcome back, Alex. Here's what's happening with your portfolio today."
+        subtitle="Welcome back. Here's what's happening with your portfolio today."
         action={
           <button className="bg-primary text-on-primary font-bold px-6 py-3 rounded-full glow-primary hover:scale-105 transition-transform">Live Preview</button>
         }
       />
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {[
-          { label: "Total Visitors", value: "12,540", icon: "group", color: "primary", delta: "+12.5%", sub: "vs last month" },
-          { label: "Projects", value: "28", icon: "folder_open", color: "secondary-fixed", delta: "+8.2%", sub: "new uploads" },
-          { label: "Messages", value: "146", icon: "chat_bubble", color: "tertiary", delta: "+18.7%", sub: "leads generated" },
-          { label: "Conversion", value: "3.8%", icon: "ads_click", color: "primary", delta: "+2.4%", sub: "hiring rate" },
-        ].map((m) => (
+        {data.stats.map((m) => (
           <div key={m.label} className="glass-panel p-6 rounded-3xl relative overflow-hidden group">
             <div className="flex justify-between items-start mb-4">
               <div>
@@ -512,20 +540,23 @@ function DashboardPage() {
           <Icon name="layers" className="text-primary" /> Manage Sections
         </h2>
         <div className="space-y-3">
-          {[
-            { icon: "token", title: "Hero Section", sub: "Last updated 2 days ago", published: true, color: "primary" },
-            { icon: "person", title: "About Me", sub: "Contains personal bio and skills", published: true, color: "secondary-fixed" },
-            { icon: "work", title: "Case Studies", sub: "High-detail project views", published: false, color: "tertiary" },
-            { icon: "handshake", title: "Services", sub: "What I offer to clients", published: true, color: "primary" },
-          ].map((s) => <SectionRow key={s.title} {...s} />)}
+          {data.sections.map((s) => <SectionRow key={s.id} id={s.id} icon={s.icon} title={s.title} sub={s.subtitle} published={s.published} color={s.color || "primary"} />)}
         </div>
       </div>
     </>
   );
 }
 
-function SectionRow({ icon, title, sub, published, color }: { icon: string; title: string; sub: string; published: boolean; color: string }) {
+function SectionRow({ id, icon, title, sub, published, color }: { id: number; icon: string; title: string; sub: string; published: boolean; color: string }) {
   const [on, setOn] = useState(published);
+  const toggle = async (checked: boolean) => {
+    setOn(checked);
+    try {
+      await adminApi.updateSection(id, checked);
+    } catch {
+      setOn(!checked);
+    }
+  };
   return (
     <div className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 hover:border-primary/20 hover:bg-white/[0.08] transition-all flex-wrap gap-3">
       <div className="flex items-center gap-4">
@@ -541,7 +572,7 @@ function SectionRow({ icon, title, sub, published, color }: { icon: string; titl
       <div className="flex items-center gap-6">
         <span className={`text-xs uppercase tracking-wider ${on ? "text-secondary-fixed" : "text-on-surface-variant/40"}`}>{on ? "Published" : "Draft"}</span>
         <label className="relative inline-flex items-center cursor-pointer">
-          <input checked={on} onChange={(e) => setOn(e.target.checked)} className="sr-only peer" type="checkbox" />
+          <input checked={on} onChange={(e) => void toggle(e.target.checked)} className="sr-only peer" type="checkbox" />
           <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
         </label>
       </div>
@@ -551,21 +582,16 @@ function SectionRow({ icon, title, sub, published, color }: { icon: string; titl
 
 /* ============== Hero ============== */
 function HeroEditor() {
-  const [d, set] = useState({
-    tag: "Hello, It's Me",
-    name: "Alex Morgan",
-    role: "Full Stack Developer & 3D Designer",
-    desc: "I create immersive digital experiences with modern technologies and beautiful 3D animations. Specializing in the intersection of code and visual art.",
-    years: "3+", projects: "30+", clients: "20+",
-    avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDTV4dOlVZZQ6R1MeCj_bizBDfUqKVytS9-WED8VuXrLBKOcduycsryW53f1SehopltWRY8jGQqOojVFk0cL29D_-PmscGoE8N_bdFc3KGRaihHE_8DlQx2bnPZuGZ8bAUB-HGfUbTKg9n62VBAfPlTkFn2o647bWlNFvoHmrqQeC-XJS7_5n4G1PLy4IGmdpOV2-dX5Ao_4_f1Z270qpktAnCedLvZmpGHzoh7v83-I4RKxAgX7DBcLJGEnyHsHVIWbHvzCVmBWSfv",
-    cta1: "Hire Me", cta2: "Download CV", cvUrl: "https://example.com/resume.pdf",
-    showStats: true, showStack: true, typing: false, floatCards: true,
-    accent: "Lavender", techStack: "JavaScript, React, Three.js, Node.js, TypeScript",
-  });
-  const upd = (k: keyof typeof d, v: any) => set((s) => ({ ...s, [k]: v }));
+  const loadHero = useCallback(() => adminApi.getHero(), []);
+  const saveHero = useCallback((data: Parameters<typeof adminApi.saveHero>[0]) => adminApi.saveHero(data), []);
+  const { data: d, loading, saving, saved, save, update, error } = useSingleton(loadHero, saveHero);
+
+  if (loading || !d) return <p className="text-on-surface-variant">{loading ? "Loading hero section..." : "Failed to load"}</p>;
+  const upd = (k: keyof typeof d, v: unknown) => update({ [k]: v } as Partial<typeof d>);
   return (
     <>
-      <PageHeader title="Hero Section" subtitle="Edit every element shown in the user-side hero." action={<SaveBtn />} />
+      <PageHeader title="Hero Section" subtitle="Edit every element shown in the user-side hero." action={<SaveBtn onClick={() => void save()} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 glass-panel rounded-3xl p-8 space-y-5">
           <Field label="Greeting Tag"><input className={inputCls} value={d.tag} onChange={(e) => upd("tag", e.target.value)} /></Field>
@@ -615,23 +641,16 @@ function HeroEditor() {
 
 /* ============== About ============== */
 function AboutEditor() {
-  const [d, set] = useState({
-    title: "About Me",
-    tag: "Get To Know Me",
-    bio: "I'm a passionate Full Stack Developer & 3D Designer who loves building interactive, modern and beautiful web experiences. I specialize in React, Next.js, Three.js and Node.js.",
-    longBio: "Over 3+ years I've delivered 30+ projects for clients across the globe — from startups to enterprises — focusing on performance, motion, and pixel-perfect detail.",
-    location: "San Francisco, CA",
-    availability: "Open to opportunities",
-    email: "hello@alexmorgan.dev", phone: "+1 (555) 010-2025",
-    resume: "https://example.com/resume.pdf",
-    image: "https://lh3.googleusercontent.com/aida-public/AB6AXuDCBBu6aAzqIOEjOyaMYW7sjIp1xZIoCSqSwiWwIB9pFWvooquI87zmyDT2-GXoIMwl1xFv-8IVc17eKnOWivK51xf7KKcGaX3NLGqIJA",
-    statValue: "30+", statLabel: "Projects Successfully Delivered",
-    languages: "English, Spanish", interests: "Generative art, climbing, electronic music",
-  });
-  const upd = (k: keyof typeof d, v: any) => set((s) => ({ ...s, [k]: v }));
+  const loadAbout = useCallback(() => adminApi.getAbout(), []);
+  const saveAbout = useCallback((data: Parameters<typeof adminApi.saveAbout>[0]) => adminApi.saveAbout(data), []);
+  const { data: d, loading, saving, saved, save, update, error } = useSingleton(loadAbout, saveAbout);
+
+  if (loading || !d) return <p className="text-on-surface-variant">{loading ? "Loading about section..." : "Failed to load"}</p>;
+  const upd = (k: keyof typeof d, v: unknown) => update({ [k]: v } as Partial<typeof d>);
   return (
     <>
-      <PageHeader title="About" subtitle="Every detail of the user-side About section." action={<SaveBtn />} />
+      <PageHeader title="About" subtitle="Every detail of the user-side About section." action={<SaveBtn onClick={() => void save()} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 glass-panel rounded-3xl p-8 space-y-5">
           <div className="grid grid-cols-2 gap-4">
@@ -669,20 +688,10 @@ function AboutEditor() {
 }
 
 /* ============== List editor (Education/Experience) ============== */
-const EDUCATION = [
-  { a: "MSc Computer Science", b: "Stanford University", c: "2020 — 2022", d: "Specialized in HCI and computer graphics. Graduated with honors." },
-  { a: "BSc Software Engineering", b: "UC Berkeley", c: "2016 — 2020", d: "Top of class, Dean's List four years running." },
-];
-const EXPERIENCE = [
-  { a: "Senior Frontend Engineer", b: "Vercel", c: "2023 — Present", d: "Leading the design-systems team across Next.js dashboards." },
-  { a: "UI Engineer", b: "Linear", c: "2021 — 2023", d: "Shipped the timeline and roadmap surfaces used by 30k+ teams." },
-  { a: "Junior Developer", b: "Airbnb", c: "2019 — 2021", d: "Worked on the host onboarding experience and growth funnels." },
-];
-
 type ListItem = { id?: number | string; a: string; b: string; c: string; d?: string };
 
-function ListEditor({ title, icon, items, columns }: { title: string; icon: string; items: ListItem[]; columns: [string, string, string] }) {
-  const crud = useCrud<ListItem>(items);
+function ListEditor({ title, icon, columns, api }: { title: string; icon: string; columns: [string, string, string]; api: { list: () => Promise<ListItem[]>; create: (item: ListItem) => Promise<ListItem>; update: (id: number, item: ListItem) => Promise<ListItem>; remove: (id: number) => Promise<void> } }) {
+  const crud = useBackendCrud(api);
   const blank: ListItem = { a: "", b: "", c: "", d: "" };
   return (
     <>
@@ -710,7 +719,7 @@ function ListEditor({ title, icon, items, columns }: { title: string; icon: stri
         {crud.items.length === 0 && <div className="px-6 py-10 text-center text-on-surface-variant opacity-60 text-sm">No entries yet. Click <b className="text-primary">Add Entry</b> to create one.</div>}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon={icon} title={crud.mode === "view" ? `${title} Details` : crud.mode === "edit" ? `Edit ${title}` : `New ${title}`} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon={icon} title={crud.mode === "view" ? `${title} Details` : crud.mode === "edit" ? `Edit ${title}` : `New ${title}`} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="grid grid-cols-2 gap-5">
             <DetailRow label={columns[0]} value={crud.current.a} />
@@ -727,7 +736,9 @@ function ListEditor({ title, icon, items, columns }: { title: string; icon: stri
           </div>
         ))}
       </Modal>
-      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && crud.remove(crud.confirm)} name={crud.confirm?.a || ""} />
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.a || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
     </>
   );
 }
@@ -736,13 +747,12 @@ function ListEditor({ title, icon, items, columns }: { title: string; icon: stri
 type Skill = { id?: number | string; name: string; level: number; category: string; icon: string };
 
 function SkillsEditor() {
-  const crud = useCrud<Skill>([
-    { name: "React / TanStack", level: 95, category: "Frontend", icon: "code" },
-    { name: "TypeScript", level: 90, category: "Language", icon: "javascript" },
-    { name: "Three.js / WebGL", level: 80, category: "3D / Graphics", icon: "view_in_ar" },
-    { name: "Node.js", level: 85, category: "Backend", icon: "dns" },
-    { name: "Figma", level: 75, category: "Design", icon: "palette" },
-  ]);
+  const crud = useBackendCrud({
+    list: adminApi.listSkills,
+    create: adminApi.createSkill,
+    update: adminApi.updateSkill,
+    remove: adminApi.deleteSkill,
+  });
   const blank: Skill = { name: "", level: 50, category: "", icon: "bolt" };
   return (
     <>
@@ -761,7 +771,7 @@ function SkillsEditor() {
         ))}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="deployed_code" title={crud.mode === "view" ? "Skill Details" : crud.mode === "edit" ? "Edit Skill" : "New Skill"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="deployed_code" title={crud.mode === "view" ? "Skill Details" : crud.mode === "edit" ? "Edit Skill" : "New Skill"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="grid grid-cols-2 gap-5">
             <DetailRow label="Name" value={crud.current.name} />
@@ -781,7 +791,9 @@ function SkillsEditor() {
           </div>
         ))}
       </Modal>
-      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && crud.remove(crud.confirm)} name={crud.confirm?.name || ""} />
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.name || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading skills...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
     </>
   );
 }
@@ -790,12 +802,12 @@ function SkillsEditor() {
 type Project = { id?: number | string; title: string; tag: string; img: string; desc: string; live: string; repo: string; tech: string; featured: boolean };
 
 function ProjectsEditor() {
-  const crud = useCrud<Project>([
-    { title: "Nebula Dashboard", tag: "Web App", img: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600", desc: "Analytics dashboard with realtime charts and 3D data viz.", live: "https://nebula.app", repo: "https://github.com/alex/nebula", tech: "React, D3, Three.js", featured: true },
-    { title: "VR Configurator", tag: "3D / WebGL", img: "https://images.unsplash.com/photo-1593508512255-86ab42a8e620?w=600", desc: "Immersive product configurator in WebXR.", live: "https://vr.demo", repo: "https://github.com/alex/vrc", tech: "Three.js, WebXR", featured: true },
-    { title: "Brand System", tag: "Design", img: "https://images.unsplash.com/photo-1561070791-2526d30994b8?w=600", desc: "End-to-end identity and design tokens.", live: "", repo: "", tech: "Figma, Tokens Studio", featured: false },
-    { title: "AI Studio", tag: "SaaS", img: "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=600", desc: "Prompt-driven creative tools for marketers.", live: "https://ai.studio", repo: "", tech: "Next.js, OpenAI", featured: true },
-  ]);
+  const crud = useBackendCrud({
+    list: adminApi.listProjects,
+    create: adminApi.createProject,
+    update: adminApi.updateProject,
+    remove: adminApi.deleteProject,
+  });
   const blank: Project = { title: "", tag: "", img: "", desc: "", live: "", repo: "", tech: "", featured: false };
   return (
     <>
@@ -818,7 +830,7 @@ function ProjectsEditor() {
         ))}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="work" maxWidth="max-w-3xl" title={crud.mode === "view" ? "Project Details" : crud.mode === "edit" ? "Edit Project" : "New Project"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="work" maxWidth="max-w-3xl" title={crud.mode === "view" ? "Project Details" : crud.mode === "edit" ? "Edit Project" : "New Project"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="space-y-5">
             {crud.current.img && <div className="aspect-video rounded-2xl overflow-hidden bg-surface-variant/40"><img src={crud.current.img} alt="" className="w-full h-full object-cover" /></div>}
@@ -852,7 +864,9 @@ function ProjectsEditor() {
           </div>
         ))}
       </Modal>
-      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && crud.remove(crud.confirm)} name={crud.confirm?.title || ""} />
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.title || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading projects...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
     </>
   );
 }
@@ -861,12 +875,12 @@ function ProjectsEditor() {
 type Service = { id?: number | string; icon: string; title: string; desc: string; price: string; visible: boolean };
 
 function ServicesEditor() {
-  const crud = useCrud<Service>([
-    { icon: "code", title: "Web Development", desc: "Full-stack apps with React, TanStack, Node.", price: "from $2,500", visible: true },
-    { icon: "view_in_ar", title: "3D Experiences", desc: "Immersive Three.js / WebGL worlds.", price: "from $4,000", visible: true },
-    { icon: "palette", title: "UI / UX Design", desc: "Interfaces that feel as good as they look.", price: "from $1,800", visible: true },
-    { icon: "rocket_launch", title: "Performance", desc: "Audits and optimization for fast sites.", price: "from $1,200", visible: false },
-  ]);
+  const crud = useBackendCrud({
+    list: adminApi.listServices,
+    create: adminApi.createService,
+    update: adminApi.updateService,
+    remove: adminApi.deleteService,
+  });
   const blank: Service = { icon: "handshake", title: "", desc: "", price: "", visible: true };
   return (
     <>
@@ -888,7 +902,7 @@ function ServicesEditor() {
         ))}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="handshake" title={crud.mode === "view" ? "Service Details" : crud.mode === "edit" ? "Edit Service" : "New Service"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="handshake" title={crud.mode === "view" ? "Service Details" : crud.mode === "edit" ? "Edit Service" : "New Service"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="grid grid-cols-2 gap-5">
             <DetailRow label="Title" value={crud.current.title} />
@@ -912,7 +926,9 @@ function ServicesEditor() {
           </div>
         ))}
       </Modal>
-      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && crud.remove(crud.confirm)} name={crud.confirm?.title || ""} />
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.title || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading services...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
     </>
   );
 }
@@ -921,13 +937,12 @@ function ServicesEditor() {
 type Message = { id?: number | string; name: string; email: string; time: string; preview: string; body: string; subject: string; unread: boolean };
 
 function MessagesPage() {
-  const crud = useCrud<Message>([
-    { name: "Sarah Williams", email: "sarah@studio.io", subject: "Collaboration on 3D Tesla project", time: "15m ago", preview: "Hey Alex, I loved your 3D work on the Tesla project. Would love to chat about a collaboration.", body: "Hey Alex, I loved your 3D work on the Tesla project. Would love to chat about a collaboration — we're scoping a configurator for an EV brand and your aesthetic is exactly what we need.", unread: true },
-    { name: "David Chen", email: "david@vrlabs.com", subject: "VR onboarding for SaaS", time: "1h ago", preview: "Looking for a developer to help build a VR onboarding experience for our SaaS product.", body: "Hi Alex — we're VR Labs and we're rebuilding our onboarding into a WebXR experience. Budget is flexible and timeline is Q4. Can we book a call?", unread: true },
-    { name: "Elena Rodriguez", email: "elena@designweek.org", subject: "Interview request", time: "3h ago", preview: "We'd love to interview you for our next issue on emerging 3D web designers.", body: "Hi Alex, Design Week Magazine here. Our next issue covers emerging 3D web designers — would you be open to a 30-minute interview?", unread: true },
-    { name: "Marcus Kim", email: "marcus@startup.co", subject: "Dashboard redesign follow-up", time: "Yesterday", preview: "Following up on our discussion about the dashboard redesign.", body: "Quick follow up — are we still aligned on shipping the dashboard refresh by end of month?", unread: false },
-    { name: "Priya Patel", email: "priya@agency.com", subject: "Thanks!", time: "2 days ago", preview: "Thank you for the quick turnaround on the landing page!", body: "Just wanted to say thank you for the lightning-fast landing page delivery. The team is thrilled.", unread: false },
-  ]);
+  const crud = useBackendCrud({
+    list: adminApi.listMessages,
+    create: adminApi.createMessage,
+    update: adminApi.updateMessage,
+    remove: adminApi.deleteMessage,
+  });
   return (
     <>
       <PageHeader title="Messages" subtitle="Inbox from your portfolio contact form." action={<span className="text-xs bg-primary text-on-primary font-bold px-3 py-1 rounded-full">{crud.items.filter((m) => m.unread).length} New</span>} />
@@ -949,7 +964,7 @@ function MessagesPage() {
         ))}
       </div>
 
-      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="mail" maxWidth="max-w-2xl" title={crud.mode === "view" ? crud.current?.subject || "Message" : "Edit Message"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={crud.save} />}>
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="mail" maxWidth="max-w-2xl" title={crud.mode === "view" ? crud.current?.subject || "Message" : "Edit Message"} footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
         {crud.current && (crud.mode === "view" ? (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-5">
@@ -978,23 +993,29 @@ function MessagesPage() {
           </div>
         ))}
       </Modal>
-      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && crud.remove(crud.confirm)} name={crud.confirm?.name || ""} />
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.name || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading messages...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
     </>
   );
 }
 
 /* ============== Analytics ============== */
 function AnalyticsPage() {
+  const [stats, setStats] = useState<{ label: string; value: string; delta: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    adminApi.getAnalytics().then((d) => setStats(d.stats)).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-on-surface-variant">Loading analytics...</p>;
+
   return (
     <>
       <PageHeader title="Analytics" subtitle="Traffic and engagement across your portfolio." action={<select className={`${inputCls} w-auto py-2`}><option>Last 30 days</option><option>Last 7 days</option><option>Last year</option></select>} />
       <section className="grid md:grid-cols-4 gap-6 mb-8">
-        {[
-          { label: "Page Views", value: "48.2k", delta: "+22%" },
-          { label: "Unique Visitors", value: "12,540", delta: "+12%" },
-          { label: "Avg. Session", value: "3m 42s", delta: "+8%" },
-          { label: "Bounce Rate", value: "32%", delta: "-4%" },
-        ].map((s) => (
+        {stats.map((s) => (
           <div key={s.label} className="glass-panel rounded-3xl p-6">
             <p className="text-xs uppercase tracking-widest text-on-surface-variant opacity-60">{s.label}</p>
             <h3 className="font-headline-lg text-headline-lg text-on-surface mt-2">{s.value}</h3>
@@ -1021,32 +1042,45 @@ function AnalyticsPage() {
 
 /* ============== Settings ============== */
 function SettingsPage() {
+  const loadSettings = useCallback(() => adminApi.getSettings(), []);
+  const saveSettings = useCallback((data: Parameters<typeof adminApi.saveSettings>[0]) => adminApi.saveSettings(data), []);
+  const { data, loading, saving, saved, save, update, error } = useSingleton(loadSettings, saveSettings);
+  const [password, setPassword] = useState("••••••••");
+
+  if (loading || !data) return <p className="text-on-surface-variant">{loading ? "Loading settings..." : "Failed to load"}</p>;
+
+  const handleSave = () => void save({ ...data, password: password !== "••••••••" ? password : undefined });
+
   return (
     <>
-      <PageHeader title="Settings" subtitle="Account, SEO, and site preferences." action={<SaveBtn />} />
+      <PageHeader title="Settings" subtitle="Account, SEO, and site preferences." action={<SaveBtn onClick={handleSave} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-2 gap-6 max-w-5xl">
         <div className="glass-panel rounded-3xl p-8 space-y-5">
           <h3 className="font-bold text-on-surface flex items-center gap-2 mb-2"><Icon name="account_circle" className="text-primary" />Account</h3>
-          <Field label="Name"><input className={inputCls} defaultValue="Alex Morgan" /></Field>
-          <Field label="Email"><input className={inputCls} defaultValue="alex@morgan.dev" /></Field>
-          <Field label="Password"><input type="password" className={inputCls} defaultValue="••••••••" /></Field>
+          <Field label="Name"><input className={inputCls} value={data.accountName} onChange={(e) => update({ accountName: e.target.value })} /></Field>
+          <Field label="Email"><input className={inputCls} value={data.accountEmail} onChange={(e) => update({ accountEmail: e.target.value })} /></Field>
+          <Field label="Password"><input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
         </div>
         <div className="glass-panel rounded-3xl p-8 space-y-5">
           <h3 className="font-bold text-on-surface flex items-center gap-2 mb-2"><Icon name="search" className="text-primary" />SEO</h3>
-          <Field label="Site Title"><input className={inputCls} defaultValue="Alex Morgan | Portfolio" /></Field>
-          <Field label="Meta Description"><textarea rows={3} className={inputCls} defaultValue="Full Stack Developer & 3D Designer." /></Field>
-          <Field label="Keywords"><input className={inputCls} defaultValue="react, three.js, web design" /></Field>
+          <Field label="Site Title"><input className={inputCls} value={data.siteTitle} onChange={(e) => update({ siteTitle: e.target.value })} /></Field>
+          <Field label="Meta Description"><textarea rows={3} className={inputCls} value={data.metaDescription} onChange={(e) => update({ metaDescription: e.target.value })} /></Field>
+          <Field label="Keywords"><input className={inputCls} value={data.keywords} onChange={(e) => update({ keywords: e.target.value })} /></Field>
         </div>
         <div className="glass-panel rounded-3xl p-8 space-y-4 lg:col-span-2">
           <h3 className="font-bold text-on-surface flex items-center gap-2 mb-2"><Icon name="tune" className="text-primary" />Preferences</h3>
           {[
-            { label: "Email notifications for new messages", on: true },
-            { label: "Show analytics widget on homepage", on: false },
-            { label: "Allow indexing by search engines", on: true },
+            { key: "emailNotifications" as const, label: "Email notifications for new messages" },
+            { key: "showAnalyticsWidget" as const, label: "Show analytics widget on homepage" },
+            { key: "allowIndexing" as const, label: "Allow indexing by search engines" },
           ].map((p) => (
-            <div key={p.label} className="flex items-center justify-between py-2 border-b border-outline-variant/20 last:border-0">
+            <div key={p.key} className="flex items-center justify-between py-2 border-b border-outline-variant/20 last:border-0">
               <span className="text-on-surface">{p.label}</span>
-              <Toggle on={p.on} />
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input checked={data[p.key]} onChange={(e) => update({ [p.key]: e.target.checked })} className="sr-only peer" type="checkbox" />
+                <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+              </label>
             </div>
           ))}
         </div>
@@ -1067,8 +1101,12 @@ function Toggle({ on: initial }: { on: boolean }) {
 
 /* ============== SMTP Mail ============== */
 function SmtpPage() {
-  const [provider, setProvider] = useState("Custom SMTP");
-  const [secure, setSecure] = useState(true);
+  const loadSmtp = useCallback(() => adminApi.getSmtp(), []);
+  const saveSmtp = useCallback((data: Parameters<typeof adminApi.saveSmtp>[0]) => adminApi.saveSmtp(data), []);
+  const { data, loading, saving, saved, save, update, error } = useSingleton(loadSmtp, saveSmtp);
+  const [testEmail, setTestEmail] = useState("");
+  const [testMsg, setTestMsg] = useState("");
+
   const presets: Record<string, { host: string; port: string }> = {
     "Custom SMTP": { host: "", port: "587" },
     Gmail: { host: "smtp.gmail.com", port: "587" },
@@ -1076,37 +1114,54 @@ function SmtpPage() {
     Mailgun: { host: "smtp.mailgun.org", port: "587" },
     "Amazon SES": { host: "email-smtp.us-east-1.amazonaws.com", port: "587" },
   };
-  const preset = presets[provider];
+
+  if (loading || !data) return <p className="text-on-surface-variant">{loading ? "Loading SMTP config..." : "Failed to load"}</p>;
+
+  const setProvider = (provider: string) => {
+    const preset = presets[provider];
+    update({ provider, host: preset.host || data.host, port: preset.port });
+  };
+
+  const sendTest = async () => {
+    try {
+      const res = await adminApi.testSmtp(testEmail || "test@example.com");
+      setTestMsg(res.message);
+    } catch (e) {
+      setTestMsg(e instanceof Error ? e.message : "Test failed");
+    }
+  };
+
   return (
     <>
-      <PageHeader title="SMTP Mail Configuration" subtitle="Connect an outgoing mail server to send contact-form replies and notifications." action={<SaveBtn />} />
+      <PageHeader title="SMTP Mail Configuration" subtitle="Connect an outgoing mail server to send contact-form replies and notifications." action={<SaveBtn onClick={() => void save()} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-3 gap-6 max-w-6xl">
         <div className="lg:col-span-2 glass-panel rounded-3xl p-8 space-y-5">
           <Field label="Mail Provider">
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} className={inputCls}>
+            <select value={data.provider} onChange={(e) => setProvider(e.target.value)} className={inputCls}>
               {Object.keys(presets).map((p) => <option key={p}>{p}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2"><Field label="SMTP Host"><input className={inputCls} defaultValue={preset.host} placeholder="smtp.example.com" /></Field></div>
-            <Field label="Port"><input className={inputCls} defaultValue={preset.port} /></Field>
+            <div className="col-span-2"><Field label="SMTP Host"><input className={inputCls} value={data.host} onChange={(e) => update({ host: e.target.value })} placeholder="smtp.example.com" /></Field></div>
+            <Field label="Port"><input className={inputCls} value={data.port} onChange={(e) => update({ port: e.target.value })} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Username"><input className={inputCls} placeholder="apikey or email" /></Field>
-            <Field label="Password / API Key"><input type="password" className={inputCls} placeholder="••••••••" /></Field>
+            <Field label="Username"><input className={inputCls} value={data.username} onChange={(e) => update({ username: e.target.value })} placeholder="apikey or email" /></Field>
+            <Field label="Password / API Key"><input type="password" className={inputCls} value={data.password} onChange={(e) => update({ password: e.target.value })} placeholder="••••••••" /></Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="From Name"><input className={inputCls} defaultValue="Alex Morgan" /></Field>
-            <Field label="From Email"><input className={inputCls} defaultValue="hello@alexmorgan.dev" /></Field>
+            <Field label="From Name"><input className={inputCls} value={data.fromName} onChange={(e) => update({ fromName: e.target.value })} /></Field>
+            <Field label="From Email"><input className={inputCls} value={data.fromEmail} onChange={(e) => update({ fromEmail: e.target.value })} /></Field>
           </div>
-          <Field label="Reply-To"><input className={inputCls} defaultValue="alex@morgan.dev" /></Field>
+          <Field label="Reply-To"><input className={inputCls} value={data.replyTo} onChange={(e) => update({ replyTo: e.target.value })} /></Field>
           <div className="flex items-center justify-between py-3 border-t border-outline-variant/30">
             <div>
               <h4 className="font-bold text-on-surface">Use TLS / SSL</h4>
               <p className="text-xs text-on-surface-variant opacity-60">Encrypt connection (recommended).</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input checked={secure} onChange={(e) => setSecure(e.target.checked)} className="sr-only peer" type="checkbox" />
+              <input checked={data.secure} onChange={(e) => update({ secure: e.target.checked })} className="sr-only peer" type="checkbox" />
               <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
             </label>
           </div>
@@ -1117,23 +1172,11 @@ function SmtpPage() {
             <h3 className="font-bold flex items-center gap-2 text-on-surface"><Icon name="bolt" className="text-primary" />Connection Status</h3>
             <div className="flex items-center gap-3 p-4 rounded-2xl bg-secondary-fixed/10 border border-secondary-fixed/20">
               <span className="w-2 h-2 rounded-full bg-secondary-fixed animate-pulse" />
-              <span className="text-sm text-on-surface">Last test: 2 minutes ago — Success</span>
+              <span className="text-sm text-on-surface">Ready — save config then send test</span>
             </div>
-            <button className="w-full py-3 rounded-xl bg-primary/20 text-primary font-bold hover:bg-primary/30 transition flex items-center justify-center gap-2"><Icon name="send" className="text-[18px]" />Send Test Email</button>
-            <input className={inputCls} placeholder="test@example.com" />
-          </div>
-          <div className="glass-panel rounded-3xl p-6 space-y-3">
-            <h3 className="font-bold flex items-center gap-2 text-on-surface"><Icon name="mark_email_read" className="text-primary" />Recent Sends</h3>
-            {[
-              { to: "sarah@studio.io", time: "5m", ok: true },
-              { to: "david@vrlabs.com", time: "1h", ok: true },
-              { to: "elena@designweek.org", time: "3h", ok: false },
-            ].map((r) => (
-              <div key={r.to} className="flex justify-between items-center text-sm py-2 border-b border-outline-variant/20 last:border-0">
-                <span className="text-on-surface truncate">{r.to}</span>
-                <span className={`text-xs ${r.ok ? "text-secondary-fixed" : "text-error"}`}>{r.ok ? "Delivered" : "Failed"} · {r.time}</span>
-              </div>
-            ))}
+            <button onClick={() => void sendTest()} className="w-full py-3 rounded-xl bg-primary/20 text-primary font-bold hover:bg-primary/30 transition flex items-center justify-center gap-2"><Icon name="send" className="text-[18px]" />Send Test Email</button>
+            <input className={inputCls} placeholder="test@example.com" value={testEmail} onChange={(e) => setTestEmail(e.target.value)} />
+            {testMsg && <p className="text-xs text-secondary-fixed">{testMsg}</p>}
           </div>
         </div>
       </div>
@@ -1167,21 +1210,29 @@ const BG_ANIMATIONS = [
 ];
 
 function AppearancePage() {
-  const [mode, setMode] = useState<"dark" | "light" | "system">("dark");
-  const [palette, setPalette] = useState(0);
-  const [radius, setRadius] = useState(16);
-  const [density, setDensity] = useState("Comfortable");
-  const [bgAnim, setBgAnim] = useState("orbs");
-  const [animSpeed, setAnimSpeed] = useState(60);
-  const [animIntensity, setAnimIntensity] = useState(50);
-  const [parallax, setParallax] = useState(true);
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const [scrollReveal, setScrollReveal] = useState(true);
-  const [hover3d, setHover3d] = useState(true);
+  const loadAppearance = useCallback(() => adminApi.getAppearance(), []);
+  const saveAppearance = useCallback((data: Parameters<typeof adminApi.saveAppearance>[0]) => adminApi.saveAppearance(data), []);
+  const { data, loading, saving, saved, save, update, error } = useSingleton(loadAppearance, saveAppearance);
+
+  if (loading || !data) return <p className="text-on-surface-variant">{loading ? "Loading appearance..." : "Failed to load"}</p>;
+
+  const { mode, palette, radius, density, bgAnim, animSpeed, animIntensity, parallax, reducedMotion, scrollReveal, hover3d } = data;
+  const setMode = (m: "dark" | "light" | "system") => update({ mode: m });
+  const setPalette = (i: number) => update({ palette: i });
+  const setRadius = (v: number) => update({ radius: v });
+  const setDensity = (d: string) => update({ density: d });
+  const setBgAnim = (id: string) => update({ bgAnim: id });
+  const setAnimSpeed = (v: number) => update({ animSpeed: v });
+  const setAnimIntensity = (v: number) => update({ animIntensity: v });
+  const setParallax = (v: boolean) => update({ parallax: v });
+  const setReducedMotion = (v: boolean) => update({ reducedMotion: v });
+  const setScrollReveal = (v: boolean) => update({ scrollReveal: v });
+  const setHover3d = (v: boolean) => update({ hover3d: v });
 
   return (
     <>
-      <PageHeader title="Appearance & Theme" subtitle="Visual identity, palette, animations, and motion settings." action={<SaveBtn />} />
+      <PageHeader title="Appearance & Theme" subtitle="Visual identity, palette, animations, and motion settings." action={<SaveBtn onClick={() => void save()} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="glass-panel rounded-3xl p-6 sm:p-8">
@@ -1280,26 +1331,46 @@ function AppearancePage() {
 
 /* ============== App Customization ============== */
 function CustomizationPage() {
+  const loadCustomization = useCallback(() => adminApi.getCustomization(), []);
+  const saveCustomization = useCallback((data: Parameters<typeof adminApi.saveCustomization>[0]) => adminApi.saveCustomization(data), []);
+  const { data, loading, saving, saved, save, update, error } = useSingleton(loadCustomization, saveCustomization);
+
+  if (loading || !data) return <p className="text-on-surface-variant">{loading ? "Loading customization..." : "Failed to load"}</p>;
+
+  const updateNav = (index: number, visible: boolean) => {
+    const navigation = data.navigation.map((n, i) => (i === index ? { ...n, visible } : n));
+    update({ navigation });
+  };
+
+  const updateSocial = (index: number, url: string) => {
+    const socialLinks = data.socialLinks.map((s, i) => (i === index ? { ...s, url } : s));
+    update({ socialLinks });
+  };
+
   return (
     <>
-      <PageHeader title="App Customization" subtitle="Branding, navigation, hero behavior, and global content." action={<SaveBtn />} />
+      <PageHeader title="App Customization" subtitle="Branding, navigation, hero behavior, and global content." action={<SaveBtn onClick={() => void save()} saving={saving} saved={saved} />} />
+      {error && <p className="text-error text-sm mb-4">{error}</p>}
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="glass-panel rounded-3xl p-8 space-y-5">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="branding_watermark" className="text-primary" />Brand</h3>
-          <Field label="Site Logo Text"><input className={inputCls} defaultValue="PORTFOLIO." /></Field>
+          <Field label="Site Logo Text"><input className={inputCls} value={data.logoText} onChange={(e) => update({ logoText: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Favicon"><input className={inputCls} defaultValue="/favicon.ico" /></Field>
-            <Field label="OG Image URL"><input className={inputCls} defaultValue="https://..." /></Field>
+            <Field label="Favicon"><input className={inputCls} value={data.favicon} onChange={(e) => update({ favicon: e.target.value })} /></Field>
+            <Field label="OG Image URL"><input className={inputCls} value={data.ogImageUrl} onChange={(e) => update({ ogImageUrl: e.target.value })} /></Field>
           </div>
-          <Field label="Tagline"><input className={inputCls} defaultValue="Crafting immersive 3D web." /></Field>
+          <Field label="Tagline"><input className={inputCls} value={data.tagline} onChange={(e) => update({ tagline: e.target.value })} /></Field>
         </div>
 
         <div className="glass-panel rounded-3xl p-8 space-y-4">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="menu" className="text-primary" />Navigation</h3>
-          {["Home", "About", "Education", "Skills", "Projects", "Contact"].map((n) => (
-            <div key={n} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/5">
-              <div className="flex items-center gap-3"><Icon name="drag_indicator" className="text-on-surface-variant cursor-grab" /><span className="text-on-surface">{n}</span></div>
-              <Toggle on={true} />
+          {data.navigation.map((n, i) => (
+            <div key={n.label} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.03] border border-white/5">
+              <div className="flex items-center gap-3"><Icon name="drag_indicator" className="text-on-surface-variant cursor-grab" /><span className="text-on-surface">{n.label}</span></div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input checked={n.visible} onChange={(e) => updateNav(i, e.target.checked)} className="sr-only peer" type="checkbox" />
+                <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+              </label>
             </div>
           ))}
         </div>
@@ -1307,26 +1378,33 @@ function CustomizationPage() {
         <div className="glass-panel rounded-3xl p-8 space-y-5">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="animation" className="text-primary" />Hero & Animation</h3>
           <Field label="Background Style">
-            <select className={inputCls}><option>Animated Orbs</option><option>Particles</option><option>Static Gradient</option><option>None</option></select>
+            <select className={inputCls} value={data.backgroundStyle} onChange={(e) => update({ backgroundStyle: e.target.value })}>
+              <option>Animated Orbs</option><option>Particles</option><option>Static Gradient</option><option>None</option>
+            </select>
           </Field>
           <Field label="Animation Speed">
-            <input type="range" min={0} max={100} defaultValue={60} className="w-full accent-primary" />
+            <input type="range" min={0} max={100} value={data.animationSpeed} onChange={(e) => update({ animationSpeed: +e.target.value })} className="w-full accent-primary" />
           </Field>
-          <div className="flex items-center justify-between"><span className="text-on-surface">Enable floating cards</span><Toggle on={true} /></div>
-          <div className="flex items-center justify-between"><span className="text-on-surface">Show typing animation</span><Toggle on={false} /></div>
+          <div className="flex items-center justify-between"><span className="text-on-surface">Enable floating cards</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input checked={data.floatingCards} onChange={(e) => update({ floatingCards: e.target.checked })} className="sr-only peer" type="checkbox" />
+              <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+            </label>
+          </div>
+          <div className="flex items-center justify-between"><span className="text-on-surface">Show typing animation</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input checked={data.typingAnimation} onChange={(e) => update({ typingAnimation: e.target.checked })} className="sr-only peer" type="checkbox" />
+              <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
+            </label>
+          </div>
         </div>
 
         <div className="glass-panel rounded-3xl p-8 space-y-5">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="share" className="text-primary" />Social Links</h3>
-          {[
-            { i: "code", l: "GitHub", v: "https://github.com/alexmorgan" },
-            { i: "alternate_email", l: "Twitter / X", v: "https://x.com/alex" },
-            { i: "business_center", l: "LinkedIn", v: "https://linkedin.com/in/alex" },
-            { i: "photo_camera", l: "Dribbble", v: "https://dribbble.com/alex" },
-          ].map((s) => (
-            <div key={s.l} className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center"><Icon name={s.i} /></div>
-              <div className="flex-1"><Field label={s.l}><input className={inputCls} defaultValue={s.v} /></Field></div>
+          {data.socialLinks.map((s, i) => (
+            <div key={s.label} className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center"><Icon name={s.icon} /></div>
+              <div className="flex-1"><Field label={s.label}><input className={inputCls} value={s.url} onChange={(e) => updateSocial(i, e.target.value)} /></Field></div>
             </div>
           ))}
         </div>
@@ -1334,8 +1412,8 @@ function CustomizationPage() {
         <div className="glass-panel rounded-3xl p-8 space-y-5 lg:col-span-2">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="code_blocks" className="text-primary" />Advanced</h3>
           <div className="grid md:grid-cols-2 gap-4">
-            <Field label="Custom CSS"><textarea rows={5} className={inputCls} placeholder="/* paste custom CSS */" /></Field>
-            <Field label="Custom <head> scripts"><textarea rows={5} className={inputCls} placeholder="<!-- analytics, pixels, etc. -->" /></Field>
+            <Field label="Custom CSS"><textarea rows={5} className={inputCls} value={data.customCss} onChange={(e) => update({ customCss: e.target.value })} placeholder="/* paste custom CSS */" /></Field>
+            <Field label="Custom <head> scripts"><textarea rows={5} className={inputCls} value={data.customHeadScripts} onChange={(e) => update({ customHeadScripts: e.target.value })} placeholder="<!-- analytics, pixels, etc. -->" /></Field>
           </div>
         </div>
       </div>

@@ -1,16 +1,14 @@
 import express from "express";
+import adminRoutes from "./routes/admin";
 
 export function createServer() {
   const app = express();
 
   app.use(express.json());
 
-  // Health check
   app.get("/api/ping", (_req, res) => res.json({ message: "pong" }));
 
-  // Routes
-
-  // Error handler (must be last)
+  app.use("/api", adminRoutes);
 
   return app;
 }
