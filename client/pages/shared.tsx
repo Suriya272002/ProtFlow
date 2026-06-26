@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 
+/* ── Shared input class (dark theme, used across all admin pages) ── */
+export const inputCls =
+  "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-on-surface focus:outline-none focus:border-primary/50 transition";
+
 /* ── Icon ── */
 export const Icon = ({
   name,
@@ -57,7 +61,6 @@ export function Field({
   );
 }
 
-
 /* ── Save button ── */
 export function SaveBtn({
   onClick,
@@ -77,17 +80,27 @@ export function SaveBtn({
 }
 
 /* ── Toggle ── */
-export function Toggle({ on: initial }: { on: boolean }) {
+export function Toggle({
+  on: initial,
+  onChange,
+}: {
+  on: boolean;
+  onChange?: (val: boolean) => void;
+}) {
   const [on, setOn] = useState(initial);
+  useEffect(() => setOn(initial), [initial]);
   return (
     <label className="relative inline-flex items-center cursor-pointer">
       <input
         checked={on}
-        onChange={(e) => setOn(e.target.checked)}
+        onChange={(e) => {
+          setOn(e.target.checked);
+          onChange?.(e.target.checked);
+        }}
         className="sr-only peer"
         type="checkbox"
       />
-      <div className="w-11 h-6 bg-surface-variant rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container" />
+      <div className="w-11 h-6 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container" />
     </label>
   );
 }
@@ -226,7 +239,7 @@ export function Modal({
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5">{children}</div>
         {footer && (
-          <div className="px-6 py-4 border-t border-outline-variant/30 flex items-center justify-end gap-2 bg-surface-variant/20">
+          <div className="px-6 py-4 border-t border-outline-variant/30 flex items-center justify-end gap-2 bg-white/5">
             {footer}
           </div>
         )}
@@ -240,10 +253,12 @@ export function ModalFooter({
   mode,
   onClose,
   onSave,
+  saving,
 }: {
   mode: ModalMode;
   onClose: () => void;
   onSave?: () => void;
+  saving?: boolean;
 }) {
   if (mode === "view")
     return (
@@ -263,14 +278,12 @@ export function ModalFooter({
         Cancel
       </button>
       <button
-        onClick={() => {
-          onSave?.();
-          onClose();
-        }}
-        className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center gap-2"
+        onClick={() => { onSave?.(); }}
+        disabled={saving}
+        className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold glow-primary hover:scale-[1.02] transition-transform flex items-center gap-2 disabled:opacity-50 disabled:scale-100"
       >
-        <Icon name="save" className="text-[18px]" />
-        {mode === "create" ? "Create" : "Save"}
+        <Icon name={saving ? "hourglass_empty" : "save"} className="text-[18px]" />
+        {saving ? "Saving…" : mode === "create" ? "Create" : "Save"}
       </button>
     </>
   );
@@ -314,10 +327,7 @@ export function ConfirmDelete({
             Cancel
           </button>
           <button
-            onClick={() => {
-              onConfirm();
-              onClose();
-            }}
+            onClick={() => { onConfirm(); onClose(); }}
             className="px-5 py-2.5 rounded-xl bg-error text-on-error font-bold hover:scale-[1.02] transition-transform flex items-center gap-2"
           >
             <Icon name="delete" className="text-[18px]" />
@@ -329,7 +339,7 @@ export function ConfirmDelete({
   );
 }
 
-/* ── useCrud hook ── */
+/* ── useCrud hook (local-only, for pages not yet wired to backend) ── */
 export function useCrud<T extends { id?: string | number }>(initial: T[]) {
   const [items, setItems] = useState<T[]>(
     initial.map((it, i) => ({ ...it, id: it.id ?? i }))
@@ -342,10 +352,7 @@ export function useCrud<T extends { id?: string | number }>(initial: T[]) {
     setCurrent(item ? { ...item } : null);
     setMode(m);
   };
-  const close = () => {
-    setMode(null);
-    setCurrent(null);
-  };
+  const close = () => { setMode(null); setCurrent(null); };
   const update = (patch: Partial<T>) =>
     setCurrent((c) => (c ? { ...c, ...patch } : c));
   const save = () => {

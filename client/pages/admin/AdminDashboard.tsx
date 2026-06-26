@@ -374,7 +374,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls = "w-full bg-surface-variant/40 border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface focus:outline-none focus:border-primary/50 transition";
+const inputCls = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-on-surface focus:outline-none focus:border-primary/50 transition";
 
 function SaveBtn({ onClick, label = "Save Changes", saving, saved }: { onClick?: () => void; label?: string; saving?: boolean; saved?: boolean }) {
   return (
@@ -1211,12 +1211,25 @@ const BG_ANIMATIONS = [
 
 function AppearancePage() {
   const loadAppearance = useCallback(() => adminApi.getAppearance(), []);
-  const saveAppearance = useCallback((data: Parameters<typeof adminApi.saveAppearance>[0]) => adminApi.saveAppearance(data), []);
+  const saveAppearance = useCallback((d: Parameters<typeof adminApi.saveAppearance>[0]) => adminApi.saveAppearance({
+    mode: d.mode ?? "dark",
+    palette: typeof d.palette === "number" ? d.palette : 0,
+    radius: d.radius ?? 16,
+    density: d.density ?? "Comfortable",
+    bgAnim: d.bgAnim ?? "orbs",
+    animSpeed: d.animSpeed ?? 60,
+    animIntensity: d.animIntensity ?? 50,
+    parallax: !!d.parallax,
+    reducedMotion: !!d.reducedMotion,
+    scrollReveal: !!d.scrollReveal,
+    hover3d: !!d.hover3d,
+  }), []);
   const { data, loading, saving, saved, save, update, error } = useSingleton(loadAppearance, saveAppearance);
 
   if (loading || !data) return <p className="text-on-surface-variant">{loading ? "Loading appearance..." : "Failed to load"}</p>;
 
-  const { mode, palette, radius, density, bgAnim, animSpeed, animIntensity, parallax, reducedMotion, scrollReveal, hover3d } = data;
+  const { mode, radius, density, bgAnim, animSpeed, animIntensity, parallax, reducedMotion, scrollReveal, hover3d } = data;
+  const palette = (typeof data.palette === "number" && data.palette >= 0 && data.palette < PALETTES.length) ? data.palette : 0;
   const setMode = (m: "dark" | "light" | "system") => update({ mode: m });
   const setPalette = (i: number) => update({ palette: i });
   const setRadius = (v: number) => update({ radius: v });
