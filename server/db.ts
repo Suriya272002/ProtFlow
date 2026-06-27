@@ -33,6 +33,17 @@ export function getDb(): Knex {
   return db;
 }
 
+export async function testDbConnection(): Promise<void> {
+  try {
+    await getDb().raw("SELECT 1");
+    const cfg = getDbConfig().connection as Record<string, unknown>;
+    console.log(`✅ Database connected → ${cfg.host}:${cfg.port}/${cfg.database}`);
+  } catch (err) {
+    console.error("❌ Database connection failed:", err);
+    process.exit(1);
+  }
+}
+
 export async function closeDb(): Promise<void> {
   if (db) {
     await db.destroy();

@@ -1,5 +1,6 @@
 import type {
   AboutData,
+  FooterConfig,
   AdminUser,
   AnalyticsData,
   AppearanceConfig,
@@ -114,6 +115,10 @@ export const adminApi = {
   getCustomization: () => api<CustomizationConfig>("/customization"),
   saveCustomization: (data: CustomizationConfig) =>
     api("/customization", { method: "PUT", body: JSON.stringify(data) }),
+
+  getFooter: () => api<FooterConfig>("/footer"),
+  saveFooter: (data: FooterConfig) =>
+    api("/footer", { method: "PUT", body: JSON.stringify(data) }),
 };
 
 export const publicApi = {

@@ -9,6 +9,31 @@ import {
   updateSingleton,
 } from "./helpers";
 
+import multer from "multer";
+import path from "path";
+import fs from "fs"
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    if (file.fieldname === "heroImage") {
+      cb(null, "./public/uploads/image/");
+    } else if (file.fieldname === "aboutImage") {
+      cb(null, "./public/uploads/about/");
+    } else if (file.fieldname === "resume") {
+      cb(null, "./public/uploads/resume/");
+    } else {
+      cb(new Error("Unsupported field"), "");
+    }
+  },
+
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}${ext}`);
+  },
+});
+
+const upload = multer({ storage });
+
 const router = Router();
 
 /* ── Auth ── */
@@ -82,11 +107,46 @@ router.get("/dashboard", requireAuth, async (_req, res) => {
   }
 });
 
-router.put("/dashboard/sections/:id", requireAuth, async (req, res) => {
+
+
+router.put("/hero", requireAuth, async (req, res) => {
   try {
-    await getDb()("section_visibility").where({ id: req.params.id }).update({ published: !!req.body.published });
-    const row = await getDb()("section_visibility").where({ id: req.params.id }).first();
-    res.json(row);
+    const b = req.body;
+
+    let avatarUrl = b.avatar;
+    let cvUrl = b.cvUrl;
+
+    // Save image
+    if (b.avatar?.startsWith("data:image")) {
+      const imageData = b.avatar.replace(/^data:image\/\w+;base64,/, "");
+      const imageName = `avatar_${Date.now()}.png`;
+      const imagePath = path.join(process.cwd(), "public/uploads", imageName);
+
+      fs.writeFileSync(imagePath, imageData, "base64");
+      avatarUrl = `/uploads/${imageName}`;
+    }
+
+    // Save resume
+    if (b.cvUrl?.startsWith("data:application/pdf")) {
+      const pdfData = b.cvUrl.replace(/^data:application\/pdf;base64,/, "");
+      const pdfName = `resume_${Date.now()}.pdf`;
+      const pdfPath = path.join(process.cwd(), "public/uploads", pdfName);
+
+      fs.writeFileSync(pdfPath, pdfData, "base64");
+      cvUrl = `/uploads/${pdfName}`;
+    }
+
+    await updateSingleton("hero_section", {
+      tag: b.tag,
+      name: b.name,
+      role: b.role,
+      description: b.desc,
+      avatar_url: avatarUrl,
+      cv_url: cvUrl,
+    });
+
+    const row = await getSingleton("hero_section");
+    res.json(mapHero(row!));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -154,17 +214,105 @@ router.get("/about", requireAuth, async (_req, res) => {
 router.put("/about", requireAuth, async (req, res) => {
   try {
     const b = req.body;
+
+    let imageUrl = b.image;
+    let resumeUrl = b.resume;
+
+    // ==========================
+    // About Image Upload
+    // ==========================
+    if (b.image && b.image.startsWith("data:image")) {
+      const imageData = b.image.replace(
+        /^data:image\/\w+;base64,/,
+        ""
+      );
+
+      const aboutDir = path.join(
+        process.cwd(),
+        "public",
+        "uploads",
+        "about"
+      );
+
+      if (!fs.existsSync(aboutDir)) {
+        fs.mkdirSync(aboutDir, { recursive: true });
+      }
+
+      const ext = b.image.substring(
+        b.image.indexOf("/") + 1,
+        b.image.indexOf(";")
+      );
+
+      const imageName = `about_${Date.now()}.${ext}`;
+
+      fs.writeFileSync(
+        path.join(aboutDir, imageName),
+        imageData,
+        "base64"
+      );
+
+      imageUrl = `/uploads/about/${imageName}`;
+    }
+
+    // ==========================
+    // Resume Upload
+    // ==========================
+    if (b.resume && b.resume.startsWith("data:application/pdf")) {
+      const pdfData = b.resume.replace(
+        /^data:application\/pdf;base64,/,
+        ""
+      );
+
+      const resumeDir = path.join(
+        process.cwd(),
+        "public",
+        "uploads",
+        "resume"
+      );
+
+      if (!fs.existsSync(resumeDir)) {
+        fs.mkdirSync(resumeDir, { recursive: true });
+      }
+
+      const pdfName = `resume_${Date.now()}.pdf`;
+
+      fs.writeFileSync(
+        path.join(resumeDir, pdfName),
+        pdfData,
+        "base64"
+      );
+
+      resumeUrl = `/uploads/resume/${pdfName}`;
+    }
+
+    // ==========================
+    // Save Database
+    // ==========================
     await updateSingleton("about_section", {
-      title: b.title, tag: b.tag, bio: b.bio, long_bio: b.longBio,
-      location: b.location, availability: b.availability, email: b.email,
-      phone: b.phone, resume_url: b.resume, image_url: b.image,
-      stat_value: b.statValue, stat_label: b.statLabel,
-      languages: b.languages, interests: b.interests,
+      title: b.title,
+      tag: b.tag,
+      bio: b.bio,
+      long_bio: b.longBio,
+      location: b.location,
+      availability: b.availability,
+      email: b.email,
+      phone: b.phone,
+      image_url: imageUrl,
+      resume_url: resumeUrl,
+      stat_value: b.statValue,
+      stat_label: b.statLabel,
+      languages: b.languages,
+      interests: b.interests,
     });
+
     const row = await getSingleton("about_section");
+
     res.json(mapAbout(row!));
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    console.error(err);
+    res.status(500).json({
+      error: String(err),
+    });
   }
 });
 
@@ -416,13 +564,16 @@ router.put("/customization", requireAuth, async (req, res) => {
 router.get("/portfolio", async (_req, res) => {
   try {
     const db = getDb();
-    const [hero, about, education, experience, skills, projects, services, customization] = await Promise.all([
+    const [hero, about, education, experience, skills, projects, services, customization, appearanceRow] = await Promise.all([
       getSingleton("hero_section"), getSingleton("about_section"),
       db("education").orderBy("sort_order"), db("experience").orderBy("sort_order"),
       db("skills").orderBy("sort_order"), db("projects").orderBy("sort_order"),
-      db("services").where({ visible: true }).orderBy("sort_order"),
+      db("services").where("visible", 1).orderBy("sort_order"),
       getSingleton("customization_config"),
+      getSingleton("appearance_config"),
     ]);
+    // Footer is safe — table may not exist yet if migration hasn't run
+    const footerRow = await getSingleton("footer_config").catch(() => null);
     res.json({
       hero: hero ? mapHero(hero) : null,
       about: about ? mapAbout(about) : null,
@@ -434,6 +585,20 @@ router.get("/portfolio", async (_req, res) => {
       customization: customization ? {
         logoText: customization.logo_text, tagline: customization.tagline,
         socialLinks: parseJsonField(customization.social_links, []),
+      } : null,
+      footer: footerRow ? mapFooter(footerRow) : null,
+      appearance: appearanceRow ? {
+        mode: appearanceRow.color_mode,
+        palette: appearanceRow.palette_index,
+        radius: appearanceRow.corner_radius,
+        density: appearanceRow.density,
+        bgAnim: appearanceRow.bg_animation,
+        animSpeed: appearanceRow.anim_speed,
+        animIntensity: appearanceRow.anim_intensity,
+        parallax: !!appearanceRow.parallax,
+        reducedMotion: !!appearanceRow.reduced_motion,
+        scrollReveal: !!appearanceRow.scroll_reveal,
+        hover3d: !!appearanceRow.hover_3d,
       } : null,
     });
   } catch (err) {
@@ -453,6 +618,50 @@ router.post("/contact", async (req, res) => {
       name, email, subject: subject || "Contact form", body, preview, unread: true,
     });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+
+/* ── Footer ── */
+function mapFooter(row: Record<string, unknown>) {
+  return {
+    tagline: row.tagline,
+    copyrightName: row.copyright_name,
+    copyrightYear: row.copyright_year,
+    links: parseJsonField(row.links, []),
+    socialLinks: parseJsonField(row.social_links, []),
+    showSocial: !!row.show_social,
+    showLinks: !!row.show_links,
+    showBackToTop: !!row.show_back_to_top,
+  };
+}
+
+router.get("/footer", requireAuth, async (_req, res) => {
+  try {
+    const row = await getSingleton("footer_config");
+    res.json(row ? mapFooter(row) : null);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put("/footer", requireAuth, async (req, res) => {
+  try {
+    const b = req.body;
+    await updateSingleton("footer_config", {
+      tagline: b.tagline,
+      copyright_name: b.copyrightName,
+      copyright_year: b.copyrightYear,
+      links: JSON.stringify(b.links ?? []),
+      social_links: JSON.stringify(b.socialLinks ?? []),
+      show_social: b.showSocial,
+      show_links: b.showLinks,
+      show_back_to_top: b.showBackToTop,
+    });
+    const row = await getSingleton("footer_config");
+    res.json(mapFooter(row!));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

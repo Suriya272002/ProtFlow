@@ -22,6 +22,17 @@ interface SkillItem      { id: number; name: string; level: number; category: st
 interface ProjectItem    { id: number; title: string; tag: string; img: string; desc: string; live: string; repo: string; tech: string; featured: boolean; }
 interface ServiceItem    { id: number; icon: string; title: string; desc: string; price: string; }
 interface CustomizationData { logoText: string; tagline: string; socialLinks: { icon: string; label: string; url: string }[]; }
+interface FooterData {
+  tagline: string;
+  copyrightName: string;
+  copyrightYear: string;
+  links: { label: string; url: string }[];
+  socialLinks: { icon: string; label: string; url: string }[];
+  showSocial: boolean;
+  showLinks: boolean;
+  showBackToTop: boolean;
+}
+interface AppearanceData { mode: "dark" | "light" | "system"; palette: number; radius: number; density: string; bgAnim: string; animSpeed: number; animIntensity: number; parallax: boolean; reducedMotion: boolean; scrollReveal: boolean; hover3d: boolean; }
 
 interface PortfolioData {
   hero: HeroData | null;
@@ -32,6 +43,57 @@ interface PortfolioData {
   projects: ProjectItem[];
   services: ServiceItem[];
   customization: CustomizationData | null;
+  appearance: AppearanceData | null;
+  footer: FooterData | null;
+}
+
+/* ── Palette definitions (must match admin PALETTES) ── */
+const PALETTES = [
+  { name: "Lavender Aurora", colors: ["#d6baff", "#7832d9", "#00dbe9", "#0e0e0f"] },
+  { name: "Sunset Blaze",    colors: ["#ff6b35", "#f7931e", "#e84393", "#1a1a1f"] },
+  { name: "Ocean Deep",      colors: ["#5cbdb9", "#2d8a9e", "#1a4a6e", "#0c2340"] },
+  { name: "Forest Moss",     colors: ["#a0c49d", "#5a8a5c", "#2d5a3d", "#1a3c2a"] },
+  { name: "Noir Gold",       colors: ["#f0d78c", "#c9a84c", "#1a1a1a", "#0d0d0d"] },
+  { name: "Cherry Pop",      colors: ["#ff6b6b", "#c44569", "#574b90", "#1b1530"] },
+  { name: "Cyber Neon",      colors: ["#00ffa3", "#00b4ff", "#ff00d4", "#06010f"] },
+  { name: "Mono Slate",      colors: ["#e2e8f0", "#94a3b8", "#475569", "#0f172a"] },
+  { name: "Peach Sorbet",    colors: ["#ffb4a2", "#e5989b", "#b5838d", "#6d6875"] },
+  { name: "Emerald Mint",    colors: ["#34d399", "#10b981", "#065f46", "#022c22"] },
+  { name: "Royal Plum",      colors: ["#c084fc", "#7e22ce", "#3b0764", "#1a0033"] },
+  { name: "Solar Flare",     colors: ["#fde047", "#f97316", "#dc2626", "#1c0a00"] },
+];
+
+/* ── CV helpers ── */
+function resolveCvUrl(cvUrl: string | undefined): string {
+  if (!cvUrl) return "";
+  if (cvUrl.startsWith("http://") || cvUrl.startsWith("https://")) return cvUrl;
+  // Files live in Express ./public/uploads/ (port 5000).
+  // Vite dev server (port 5173) does NOT serve them, so point directly to backend.
+  const backendOrigin =
+    (import.meta as any).env?.VITE_API_URL ??
+    `${window.location.protocol}//${window.location.hostname}:5000`;
+  const p = cvUrl.startsWith("/") ? cvUrl : `/${cvUrl}`;
+  return `${backendOrigin}${p}`;
+}
+
+async function downloadCv(url: string, filename: string): Promise<void> {
+  if (!url) return;
+  const dlName = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
+  try {
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = dlName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 /* ── Theme ── */
@@ -50,20 +112,73 @@ function useTheme() {
     localStorage.setItem("theme", next);
     setTheme(next);
   };
-  return { theme, toggle };
+  return { theme, toggle, setTheme };
+}
+
+/* ── Apply appearance settings from admin to the page ── */
+function applyAppearance(appearance: AppearanceData | null) {
+  if (!appearance) return;
+  const root = document.documentElement;
+
+  const effectiveMode =
+    appearance.mode === "system"
+      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : appearance.mode;
+  root.classList.remove("dark", "light");
+  root.classList.add(effectiveMode);
+  localStorage.setItem("theme", effectiveMode);
+
+  const pal = PALETTES[appearance.palette ?? 0] ?? PALETTES[0];
+  root.style.setProperty("--palette-primary",    pal.colors[0]);
+  root.style.setProperty("--palette-secondary",  pal.colors[1]);
+  root.style.setProperty("--palette-accent",     pal.colors[2]);
+  root.style.setProperty("--palette-background", pal.colors[3]);
+
+  root.style.setProperty("--radius", `${appearance.radius ?? 16}px`);
+  root.style.setProperty("--anim-speed", String((appearance.animSpeed ?? 60) / 100));
+  root.style.setProperty("--anim-intensity", String((appearance.animIntensity ?? 50) / 100));
+
+  if (appearance.reducedMotion) {
+    root.style.setProperty("--motion-duration", "0s");
+  } else {
+    root.style.removeProperty("--motion-duration");
+  }
+
+  root.dataset.bgAnim      = appearance.bgAnim      ?? "orbs";
+  root.dataset.parallax    = appearance.parallax     ? "1" : "0";
+  root.dataset.scrollReveal= appearance.scrollReveal ? "1" : "0";
+  root.dataset.hover3d     = appearance.hover3d      ? "1" : "0";
+  root.dataset.density     = appearance.density      ?? "Comfortable";
 }
 
 /* ── Scroll reveal ── */
-function useScrollReveal() {
+function useScrollReveal(ready: boolean) {
   useEffect(() => {
-    const els = document.querySelectorAll(".reveal");
-    const io = new IntersectionObserver(
-      (entries) => entries.forEach((e) => e.isIntersecting && e.target.classList.add("in")),
-      { threshold: 0.12 }
-    );
-    els.forEach((el) => io.observe(el));
-    return () => io.disconnect();
-  }, []);
+    if (!ready) return;
+    const timer = setTimeout(() => {
+      const els = document.querySelectorAll(".reveal");
+      const io = new IntersectionObserver(
+        (entries) =>
+          entries.forEach((e) => {
+            if (e.isIntersecting) {
+              e.target.classList.add("in");
+              io.unobserve(e.target);
+            }
+          }),
+        { threshold: 0.08 }
+      );
+      els.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight) {
+          el.classList.add("in");
+        } else {
+          io.observe(el);
+        }
+      });
+      return () => io.disconnect();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [ready]);
 }
 
 /* ── Active section tracker ── */
@@ -102,33 +217,46 @@ const Icon = ({ name, className = "" }: { name: string; className?: string }) =>
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
 );
 
+const colorStyles = [
+  { bg: "bg-primary/10",           text: "text-primary",           bar: "bg-primary" },
+  { bg: "bg-secondary/10",         text: "text-secondary",         bar: "bg-secondary" },
+  { bg: "bg-tertiary/10",          text: "text-tertiary",          bar: "bg-tertiary" },
+  { bg: "bg-primary-container/20", text: "text-primary-container", bar: "bg-primary-container" },
+];
+
 const NAV_LINKS = [
   { href: "home",      label: "Home"      },
   { href: "about",     label: "About"     },
   { href: "education", label: "Education" },
   { href: "skills",    label: "Skills"    },
   { href: "projects",  label: "Projects"  },
+  { href: "services",  label: "Services"  },
   { href: "contact",   label: "Contact"   },
 ];
 const SECTION_IDS = NAV_LINKS.map((n) => n.href);
 
 export function HomePage() {
-  const { theme, toggle } = useTheme();
-  useScrollReveal();
+  const { theme, toggle, setTheme } = useTheme();
 
-  /* ── API data ── */
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
   const [loading, setLoading] = useState(true);
+  useScrollReveal(!loading);
 
   useEffect(() => {
     publicApi
       .getPortfolio()
-      .then((d) => setPortfolio(d as unknown as PortfolioData))
+      .then((d) => {
+        const data = d as unknown as PortfolioData;
+        setPortfolio(data);
+        applyAppearance(data.appearance);
+        if (data.appearance?.mode && data.appearance.mode !== "system") {
+          setTheme(data.appearance.mode);
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  /* ── Contact form ── */
   const [form, setForm] = useState({ name: "", email: "", subject: "", body: "" });
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -144,7 +272,6 @@ export function HomePage() {
     setSending(false);
   };
 
-  /* ── Nav ── */
   const activeSection = useActiveSection(SECTION_IDS);
   const scrolled = useScrolled();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -152,23 +279,49 @@ export function HomePage() {
   const sparkles = Array.from({ length: 18 }, (_, i) => ({
     top: `${(i * 53) % 100}%`,
     left: `${(i * 37) % 100}%`,
-    delay: `${(i % 6) * 0.8}s`,
+    delay: `${(i % 12) * 0.4}s`,
   }));
 
-  /* ── Derived data with fallbacks ── */
   const hero = portfolio?.hero;
   const about = portfolio?.about;
   const education = portfolio?.education ?? [];
   const experience = portfolio?.experience ?? [];
-  const skills = portfolio?.skills ?? [];
-  const projects = portfolio?.projects ?? [];
-  const services = portfolio?.services ?? [];
+  const skills    = Array.isArray(portfolio?.skills)   ? portfolio!.skills   : [];
+  const services  = Array.isArray(portfolio?.services) ? portfolio!.services : [];
+  const projects  = portfolio?.projects ?? [];
   const customization = portfolio?.customization;
+  const footer = portfolio?.footer;
   const logoText = customization?.logoText ?? "PORTFOLIO.";
 
   const techIcons = hero?.techStack
-    ? hero.techStack.split(",").map((s) => s.trim()).slice(0, 6)
+    ? hero.techStack.split(",").map((s) => s.trim()).slice(0, 12)
     : ["JavaScript", "React", "Three.js"];
+
+  const TECH_ICON_MAP: Record<string, string> = {
+    javascript: "javascript", js: "javascript",
+    typescript: "code_blocks", ts: "code_blocks",
+    react: "deployed_code", "react.js": "deployed_code", reactjs: "deployed_code",
+    nextjs: "dns", "next.js": "dns",
+    vue: "layers", angular: "change_history",
+    node: "terminal", nodejs: "terminal", "node.js": "terminal",
+    python: "code", django: "language", flask: "science",
+    java: "coffee", kotlin: "phone_android",
+    swift: "phone_iphone", ios: "phone_iphone",
+    android: "phone_android", flutter: "flutter_dash",
+    css: "style", tailwind: "design_services", sass: "palette",
+    html: "html", figma: "design_services",
+    "three.js": "view_in_ar", threejs: "view_in_ar", webgl: "view_in_ar",
+    blender: "view_in_ar", unity: "videogame_asset",
+    docker: "inventory_2", kubernetes: "hub", aws: "cloud",
+    firebase: "local_fire_department", mongodb: "storage",
+    postgresql: "database", mysql: "database", sql: "database",
+    graphql: "share", rest: "api", git: "merge", github: "merge",
+    linux: "computer",
+  };
+  function getTechIcon(name: string): string {
+    const key = name.toLowerCase().replace(/\s+/g, "");
+    return TECH_ICON_MAP[key] ?? "code";
+  }
 
   return (
     <div className="font-body-md text-on-surface relative">
@@ -194,12 +347,10 @@ export function HomePage() {
             : "bg-white/5 shadow-[0_0_20px_rgba(214,186,255,0.15)]"
         }`}
       >
-        {/* Logo */}
         <div className="font-headline-md text-headline-md font-bold tracking-tighter text-on-surface shrink-0">
           {logoText}
         </div>
 
-        {/* Desktop links */}
         <div className="hidden lg:flex items-center gap-6 xl:gap-8 min-w-0">
           {NAV_LINKS.map((n) => (
             <a
@@ -216,7 +367,6 @@ export function HomePage() {
           ))}
         </div>
 
-        {/* Right controls */}
         <div className="flex gap-2 md:gap-3 shrink-0 items-center">
           <button
             onClick={toggle}
@@ -237,7 +387,6 @@ export function HomePage() {
           >
             {hero?.cta1 ?? "Hire Me"}
           </a>
-          {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen((o) => !o)}
             className="lg:hidden w-9 h-9 rounded-full border border-white/10 flex items-center justify-center text-on-surface hover:bg-white/5"
@@ -249,10 +398,7 @@ export function HomePage() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        >
+        <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setMobileOpen(false)}>
           <div className="absolute top-20 left-4 right-4 glass-panel rounded-2xl border border-white/10 p-4 flex flex-col gap-1">
             {NAV_LINKS.map((n) => (
               <a
@@ -296,9 +442,9 @@ export function HomePage() {
                 </p>
                 <div className="flex gap-4 items-center">
                   <div className="flex -space-x-3">
-                    {techIcons.slice(0, 3).map((ic, i) => (
-                      <div key={i} className="w-12 h-12 rounded-full border-2 border-background glass-card flex items-center justify-center floating" style={{ animationDelay: `${i}s` }}>
-                        <Icon name="code" className="text-primary" />
+                    {techIcons.map((ic, i) => (
+                      <div key={i} className="w-12 h-12 rounded-full border-2 border-background glass-card flex items-center justify-center floating" style={{ animationDelay: `${i}s` }} title={ic}>
+                        <Icon name={getTechIcon(ic)} className="text-primary" />
                       </div>
                     ))}
                   </div>
@@ -320,9 +466,13 @@ export function HomePage() {
                   <a href={hero?.cvUrl ?? "#"} className="px-8 py-4 rounded-xl bg-gradient-to-r from-primary to-primary-container text-on-primary font-bold hover:scale-105 transition-all">
                     {hero?.cta1 ?? "Hire Me"}
                   </a>
-                  <a href="#contact" className="px-8 py-4 rounded-xl border border-white/10 glass-card font-bold hover:bg-white/10 transition-all">
-                    {hero?.cta2 ?? "Contact Me"}
-                  </a>
+                  <button
+                    type="button"
+                    onClick={() => downloadCv(resolveCvUrl(hero?.cvUrl), `${hero?.name ?? "resume"}.pdf`)}
+                    className="px-8 py-4 rounded-xl border border-white/10 glass-card font-bold hover:bg-white/10 transition-all"
+                  >
+                    {hero?.cta2 ?? "Download CV"}
+                  </button>
                 </div>
               </div>
               <div className="w-full md:w-1/2 h-[600px] relative z-10 flex items-center justify-center scene-3d">
@@ -330,7 +480,7 @@ export function HomePage() {
                   <div className="ring-3d ring-a" /><div className="ring-3d ring-b" /><div className="ring-3d ring-c" />
                   <div className="orbit-3d">
                     {["javascript", "view_in_ar", "code", "deployed_code", "bolt", "rocket_launch"].map((ic, i) => (
-                      <div key={ic} className="orbit-item" style={{ transform: `rotateY(${i * 60}deg) translateZ(220px)` }}>
+                      <div key={ic} className="orbit-item" style={{ transform: `rotateY(${i * 30}deg) translateZ(220px)` }}>
                         <div className="cube-3d"><Icon name={ic} className="text-primary" /></div>
                       </div>
                     ))}
@@ -411,17 +561,16 @@ export function HomePage() {
             {skills.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {skills.map((s, i) => {
-                  const colors = ["primary", "secondary", "tertiary", "primary-container"];
-                  const color = colors[i % colors.length];
+                  const color = colorStyles[i % colorStyles.length];
                   return (
                     <div key={s.id} className="glass-card p-8 rounded-2xl space-y-4 border border-white/5 hover:translate-y-[-8px] transition-all duration-300 group reveal tilt-card">
-                      <div className={`w-14 h-14 rounded-xl bg-${color}/10 flex items-center justify-center text-${color} group-hover:scale-110 transition-transform`}>
+                      <div className={`w-14 h-14 rounded-xl ${color.bg} flex items-center justify-center ${color.text}`}>
                         <Icon name={s.icon} className="text-headline-lg" />
                       </div>
                       <h3 className="font-headline-md text-headline-md">{s.name}</h3>
                       <p className="text-body-md text-on-surface-variant">{s.category}</p>
                       <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                        <div className={`h-full bg-${color}`} style={{ width: `${s.level}%` }} />
+                        <div className={`h-full ${color.bar}`} style={{ width: `${s.level}%` }} />
                       </div>
                     </div>
                   );
@@ -509,7 +658,26 @@ export function HomePage() {
                     <span className="text-label-sm font-label-sm text-primary uppercase">{e.c}</span>
                     <h3 className="font-headline-md text-headline-md mt-2">{e.a}</h3>
                     <p className="text-on-surface-variant font-medium">{e.b}</p>
-                    {e.d && <p className="text-body-md text-on-surface-variant/70 mt-3">{e.d}</p>}
+                    {e.d && (() => {
+                      const hasPct = e.d.includes("||");
+                      const desc = hasPct ? e.d.split("||")[0] : e.d;
+                      const pct  = hasPct ? parseInt(e.d.split("||")[1]) : null;
+                      return (
+                        <>
+                          {desc && <p className="text-body-md text-on-surface-variant/70 mt-3">{desc}</p>}
+                          {pct !== null && (
+                            <div className="mt-3 space-y-1">
+                              <div className="flex justify-between text-xs text-on-surface-variant/60">
+                                <span>Grade</span><span className="text-primary font-bold">{pct}%</span>
+                              </div>
+                              <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-primary to-primary-container" style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -537,28 +705,42 @@ export function HomePage() {
         </section>
 
         {/* ── Services ── */}
-        {services.length > 0 && (
-          <section id="services" className="py-stack-xl px-margin-desktop">
-            <div className="max-w-6xl mx-auto space-y-12">
-              <div className="text-center space-y-4">
-                <span className="text-primary font-label-sm text-label-sm tracking-widest uppercase">What I Offer</span>
-                <h2 className="font-headline-xl text-headline-xl glow-text">Services</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {services.map((s) => (
-                  <div key={s.id} className="glass-card p-8 rounded-2xl space-y-4 border border-white/5 hover:border-primary/30 hover:translate-y-[-6px] transition-all duration-300 reveal">
-                    <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                      <Icon name={s.icon} className="text-headline-lg" />
-                    </div>
-                    <h3 className="font-headline-md text-headline-md">{s.title}</h3>
-                    <p className="text-body-md text-on-surface-variant">{s.desc}</p>
-                    <p className="text-primary font-bold">{s.price}</p>
-                  </div>
-                ))}
-              </div>
+        <section id="services" className="py-stack-xl px-margin-desktop">
+          <div className="max-w-6xl mx-auto space-y-12">
+            <div className="text-center space-y-4">
+              <span className="text-primary font-label-sm text-label-sm tracking-widest uppercase">What I Offer</span>
+              <h2 className="font-headline-xl text-headline-xl glow-text">Services</h2>
             </div>
-          </section>
-        )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {(services?.length ? services : [
+                { id: 1, icon: "code",      title: "Web Development", desc: "Full-stack apps with React, Node.js and TypeScript.", price: "from $2,500" },
+                { id: 2, icon: "view_in_ar", title: "3D Experiences",  desc: "Immersive Three.js and WebGL experiences.",           price: "from $4,000" },
+                { id: 3, icon: "palette",   title: "UI / UX Design",  desc: "Modern and beautiful interfaces.",                    price: "from $1,800" },
+              ]).map((s, i) => {
+                const styles = [
+                  { bg: "bg-primary/10",   text: "text-primary",   border: "hover:border-primary/40"   },
+                  { bg: "bg-secondary/10", text: "text-secondary", border: "hover:border-secondary/40" },
+                  { bg: "bg-tertiary/10",  text: "text-tertiary",  border: "hover:border-tertiary/40"  },
+                ];
+                const style = styles[i % styles.length];
+                return (
+                  <div key={s.id} className={`glass-card p-8 rounded-2xl border border-white/10 ${style.border} hover:translate-y-[-8px] transition-all duration-300 space-y-5`}>
+                    <div className={`w-16 h-16 rounded-2xl ${style.bg} ${style.text} flex items-center justify-center`}>
+                      <Icon name={s.icon} className="text-[32px]" />
+                    </div>
+                    <div className="space-y-3">
+                      <h3 className="text-2xl font-bold text-white">{s.title}</h3>
+                      <p className="text-on-surface-variant leading-relaxed">{s.desc}</p>
+                      <div className="pt-2">
+                        <span className="text-primary font-bold text-lg">{s.price}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
 
         {/* ── Contact ── */}
         <section id="contact" className="py-stack-xl px-margin-desktop bg-surface">
@@ -636,23 +818,49 @@ export function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="py-12 px-margin-desktop border-t border-white/5 max-w-[1440px] mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+      <footer className="relative z-10 py-12 px-margin-desktop border-t border-white/5 max-w-[1440px] mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
         <div className="font-headline-md text-headline-md text-on-surface">{logoText}</div>
-        <div className="text-on-surface-variant font-body-md text-center">© 2024 {hero?.name ?? "Alex Morgan"}. Engineered with Precision.</div>
-        <div className="flex gap-8 flex-wrap justify-center">
-          {["Privacy Policy", "Terms of Service", "Github", "LinkedIn"].map((l) => (
-            <a key={l} href="#" className="text-on-surface-variant hover:text-primary transition-colors text-label-sm font-label-sm uppercase tracking-widest">{l}</a>
-          ))}
+        <div className="text-on-surface-variant font-body-md text-center">
+          © {footer?.copyrightYear ?? new Date().getFullYear()}{" "}
+          {footer?.copyrightName && footer.copyrightName !== "Alex Morgan" ? footer.copyrightName : (hero?.name ?? footer?.copyrightName ?? "Alex Morgan")}.{" "}
+          {footer?.tagline ?? "Engineered with Precision."}
+        </div>
+        <div className="flex flex-col items-center gap-4">
+          {(footer?.showLinks !== false) && (
+            <div className="flex gap-6 flex-wrap justify-center">
+              {(footer?.links?.length ? footer.links : [
+                { label: "Privacy Policy", url: "#" },
+                { label: "Terms of Service", url: "#" },
+                { label: "GitHub", url: "#" },
+                { label: "LinkedIn", url: "#" },
+              ]).map((l) => (
+                <a key={l.label} href={l.url} className="text-on-surface-variant hover:text-primary transition-colors text-label-sm font-label-sm uppercase tracking-widest">
+                  {l.label}
+                </a>
+              ))}
+            </div>
+          )}
+          {(footer?.showSocial !== false) && (footer?.socialLinks?.length ?? 0) > 0 && (
+            <div className="flex gap-3">
+              {footer!.socialLinks.map((s) => (
+                <a key={s.label} href={s.url} target="_blank" rel="noopener noreferrer" title={s.label}
+                  className="w-9 h-9 rounded-full glass-card flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all duration-300">
+                  <Icon name={s.icon} className="text-[18px]" />
+                </a>
+              ))}
+            </div>
+          )}
         </div>
       </footer>
 
-      {/* Back to top */}
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        className="fixed bottom-8 right-8 w-16 h-16 rounded-full bg-primary text-on-primary shadow-[0_0_30px_rgba(214,186,255,0.4)] flex items-center justify-center hover:scale-110 active:scale-90 transition-all z-40 group"
-      >
-        <Icon name="arrow_upward" className="text-headline-lg" />
-      </button>
+      {(footer?.showBackToTop !== false) && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-8 right-8 w-16 h-16 rounded-full bg-primary text-on-primary shadow-[0_0_30px_rgba(214,186,255,0.4)] flex items-center justify-center hover:scale-110 active:scale-90 transition-all z-40 group"
+        >
+          <Icon name="arrow_upward" className="text-headline-lg" />
+        </button>
+      )}
     </div>
   );
 }

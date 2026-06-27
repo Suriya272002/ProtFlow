@@ -18,7 +18,7 @@ const NAV_MAIN = [
   { icon: "deployed_code", label: "Skills" },
   { icon: "work", label: "Projects" },
   { icon: "history", label: "Experience" },
-  { icon: "handshake", label: "Services" },
+  { icon: "freelance", label: "Freelancing" },
 ];
 
 const NAV_OPS = [
@@ -160,11 +160,11 @@ export function AdminDashboard() {
         {active === "Dashboard" && <DashboardPage />}
         {active === "Hero Section" && <HeroEditor />}
         {active === "About" && <AboutEditor />}
-        {active === "Education" && <ListEditor title="Education" icon="school" columns={["Degree", "Institution", "Year"]} api={{ list: adminApi.listEducation, create: adminApi.createEducation, update: adminApi.updateEducation, remove: adminApi.deleteEducation }} />}
+        {active === "Education" && <EducationEditor />}
         {active === "Skills" && <SkillsEditor />}
         {active === "Projects" && <ProjectsEditor />}
         {active === "Experience" && <ListEditor title="Experience" icon="history" columns={["Role", "Company", "Period"]} api={{ list: adminApi.listExperience, create: adminApi.createExperience, update: adminApi.updateExperience, remove: adminApi.deleteExperience }} />}
-        {active === "Services" && <ServicesEditor />}
+        {active === "Freelancing" && <FreelancingEditor />}
         {active === "Messages" && <MessagesPage />}
         {active === "Users" && <UsersPage />}
         {active === "Analytics" && <AnalyticsPage />}
@@ -611,7 +611,27 @@ function HeroEditor() {
             <Field label="Primary CTA"><input className={inputCls} value={d.cta1} onChange={(e) => upd("cta1", e.target.value)} /></Field>
             <Field label="Secondary CTA"><input className={inputCls} value={d.cta2} onChange={(e) => upd("cta2", e.target.value)} /></Field>
           </div>
-          <Field label="Resume / CV URL"><input className={inputCls} value={d.cvUrl} onChange={(e) => upd("cvUrl", e.target.value)} /></Field>
+         <Field label="Resume / CV URL"><input className={inputCls} value={d.cvUrl} onChange={(e) => upd("cvUrl", e.target.value)} /></Field>
+<label className="w-full py-2.5 rounded-xl bg-primary/20 text-primary font-bold text-sm flex items-center justify-center gap-2 cursor-pointer hover:bg-primary/30 transition-colors">
+  <Icon name="cloud_upload" className="text-[18px]" /> Upload Resume (PDF only)
+  <input
+    type="file"
+    accept="application/pdf"
+    className="hidden"
+    onChange={(e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (file.type !== "application/pdf") {
+        alert("Only PDF files are allowed for the resume/CV.");
+        e.target.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => upd("cvUrl", ev.target?.result as string);
+      reader.readAsDataURL(file);
+    }}
+  />
+</label>
           <div className="grid sm:grid-cols-2 gap-3 pt-3 border-t border-outline-variant/20">
             {[
               { k: "showStats", l: "Show stats counters", i: "tag" },
@@ -628,11 +648,48 @@ function HeroEditor() {
         </div>
         <div className="glass-panel rounded-3xl p-6 space-y-4">
           <h3 className="font-bold text-on-surface flex items-center gap-2"><Icon name="image" className="text-primary" /> Avatar</h3>
-          <div className="aspect-square rounded-2xl overflow-hidden bg-surface-variant/40 border border-outline-variant/40">
-            <img src={d.avatar} alt="" className="w-full h-full object-cover" />
+          <div className="aspect-square rounded-2xl overflow-hidden bg-surface-variant/40 border border-outline-variant/40 relative group">
+            {d.avatar && <img src={d.avatar} alt="" className="w-full h-full object-cover" />}
+            {!d.avatar && <div className="w-full h-full flex items-center justify-center text-on-surface-variant"><Icon name="person" className="text-[48px]" /></div>}
           </div>
-          <Field label="Avatar URL"><input className={inputCls} value={d.avatar} onChange={(e) => upd("avatar", e.target.value)} /></Field>
-          <button className="w-full py-2.5 rounded-xl bg-primary/20 text-primary font-bold text-sm flex items-center justify-center gap-2"><Icon name="cloud_upload" className="text-[18px]" /> Upload Image</button>
+          <Field label="Avatar URL"><input className={inputCls} value={d.avatar} onChange={(e) => upd("avatar", e.target.value)} placeholder="https://..." /></Field>
+          <label className="w-full py-2.5 rounded-xl bg-primary/20 text-primary font-bold text-sm flex items-center justify-center gap-2 cursor-pointer hover:bg-primary/30 transition-colors">
+            <Icon name="cloud_upload" className="text-[18px]" /> Upload Image
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => upd("avatar", ev.target?.result as string);
+              reader.readAsDataURL(file);
+            }} />
+          </label>
+          {/* Tech Stack Icon Preview */}
+          <div className="pt-2 border-t border-outline-variant/20 space-y-3">
+            <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant opacity-60">Tech Stack Preview</p>
+            <div className="flex flex-wrap gap-2">
+              {(d.techStack || "").split(",").map((t) => t.trim()).filter(Boolean).map((t, i) => (
+                <div key={i} title={t} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-medium border border-primary/20">
+                  <span className="material-symbols-outlined text-[14px]">{
+                    (() => {
+                      const k = t.toLowerCase().replace(/\s+/g, "");
+                      const map: Record<string,string> = {
+                        javascript:"javascript",js:"javascript",typescript:"code_blocks",ts:"code_blocks",
+                        react:"deployed_code",nextjs:"dns","next.js":"dns",vue:"layers",angular:"change_history",
+                        node:"terminal",nodejs:"terminal","node.js":"terminal",python:"code",
+                        css:"style",tailwind:"design_services",html:"html",figma:"design_services",
+                        "three.js":"view_in_ar",threejs:"view_in_ar",webgl:"view_in_ar",
+                        docker:"inventory_2",aws:"cloud",firebase:"local_fire_department",
+                        mongodb:"storage",postgresql:"database",mysql:"database",git:"merge",
+                      };
+                      return map[k] ?? "code";
+                    })()
+                  }</span>
+                  {t}
+                </div>
+              ))}
+              {!(d.techStack || "").trim() && <p className="text-xs text-on-surface-variant opacity-50">Add comma-separated tech names above</p>}
+            </div>
+          </div>
         </div>
       </div>
     </>
@@ -679,8 +736,20 @@ function AboutEditor() {
             <Field label="Stat Value"><input className={inputCls} value={d.statValue} onChange={(e) => upd("statValue", e.target.value)} /></Field>
             <Field label="Stat Label"><input className={inputCls} value={d.statLabel} onChange={(e) => upd("statLabel", e.target.value)} /></Field>
           </div>
-          <Field label="About Image URL"><input className={inputCls} value={d.image} onChange={(e) => upd("image", e.target.value)} /></Field>
-          <div className="aspect-square rounded-2xl overflow-hidden bg-surface-variant/40 border border-outline-variant/40"><img src={d.image} alt="" className="w-full h-full object-cover" /></div>
+          <Field label="About Image URL"><input className={inputCls} value={d.image} onChange={(e) => upd("image", e.target.value)} placeholder="https://..." /></Field>
+          <div className="aspect-square rounded-2xl overflow-hidden bg-surface-variant/40 border border-outline-variant/40">
+            {d.image ? <img src={d.image} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-on-surface-variant"><Icon name="image" className="text-[48px]" /></div>}
+          </div>
+          <label className="w-full py-2.5 rounded-xl bg-primary/20 text-primary font-bold text-sm flex items-center justify-center gap-2 cursor-pointer hover:bg-primary/30 transition-colors">
+            <Icon name="cloud_upload" className="text-[18px]" /> Upload About Image
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => upd("image", ev.target?.result as string);
+              reader.readAsDataURL(file);
+            }} />
+          </label>
         </div>
       </div>
     </>
@@ -871,7 +940,191 @@ function ProjectsEditor() {
   );
 }
 
-/* ============== Services ============== */
+
+/* ============== Education (with percentage) ============== */
+function EducationEditor() {
+  const crud = useBackendCrud({
+    list: adminApi.listEducation,
+    create: adminApi.createEducation,
+    update: adminApi.updateEducation,
+    remove: adminApi.deleteEducation,
+  });
+  // We store percentage in the `d` field as "Description||75" — split on ||
+  const getDesc = (d?: string) => d?.includes("||") ? d.split("||")[0] : (d ?? "");
+  const getPct  = (d?: string) => d?.includes("||") ? d.split("||")[1] : "";
+  const packD   = (desc: string, pct: string) => pct ? `${desc}||${pct}` : desc;
+
+  const blank = { a: "", b: "", c: "", d: "" };
+  return (
+    <>
+      <PageHeader
+        title="Education"
+        subtitle="Manage your education entries — shown live on the user portfolio."
+        action={
+          <button onClick={() => crud.open("create", blank)} className="bg-primary text-on-primary font-bold px-5 py-3 rounded-full glow-primary hover:scale-105 transition-transform flex items-center gap-2">
+            <Icon name="add" className="text-[18px]" /> Add Entry
+          </button>
+        }
+      />
+      <div className="glass-panel rounded-3xl overflow-hidden">
+        <div className="hidden md:grid grid-cols-[1fr_1fr_160px_80px_140px] gap-4 px-6 py-4 border-b border-outline-variant/30 text-xs uppercase tracking-widest text-on-surface-variant opacity-60">
+          <span>Degree</span><span>Institution</span><span>Year</span><span>Grade</span><span className="text-right">Actions</span>
+        </div>
+        {crud.items.map((it) => (
+          <div key={it.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_160px_80px_140px] gap-2 md:gap-4 px-4 md:px-6 py-4 border-b border-outline-variant/20 hover:bg-white/[0.03] md:items-center">
+            <div className="flex items-center gap-3 min-w-0"><Icon name="school" className="text-primary shrink-0" /><span className="font-bold text-on-surface truncate">{it.a}</span></div>
+            <span className="text-on-surface-variant text-sm truncate">{it.b}</span>
+            <span className="text-on-surface-variant text-xs opacity-70">{it.c}</span>
+            <span className="text-primary font-bold text-sm">{getPct(it.d) ? `${getPct(it.d)}%` : "—"}</span>
+            <RowActions onView={() => crud.open("view", it)} onEdit={() => crud.open("edit", it)} onDelete={() => crud.setConfirm(it)} />
+          </div>
+        ))}
+        {crud.items.length === 0 && <div className="px-6 py-10 text-center text-on-surface-variant opacity-60 text-sm">No entries yet.</div>}
+      </div>
+
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="school"
+        title={crud.mode === "view" ? "Education Details" : crud.mode === "edit" ? "Edit Education" : "New Education"}
+        footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
+        {crud.current && (crud.mode === "view" ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-5">
+              <DetailRow label="Degree" value={crud.current.a} />
+              <DetailRow label="Institution" value={crud.current.b} />
+              <DetailRow label="Year" value={crud.current.c} />
+              <DetailRow label="Grade" value={getPct(crud.current.d) ? `${getPct(crud.current.d)}%` : "—"} />
+            </div>
+            {getDesc(crud.current.d) && (
+              <DetailRow label="Description" value={getDesc(crud.current.d)} full />
+            )}
+            {getPct(crud.current.d) && (
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-on-surface-variant opacity-60 font-bold mb-2">Grade</p>
+                <div className="h-2 bg-surface-variant/40 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-primary to-primary-container" style={{ width: `${getPct(crud.current.d)}%` }} />
+                </div>
+                <p className="text-right text-xs text-primary font-bold mt-1">{getPct(crud.current.d)}%</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Field label="Degree / Course"><input className={inputCls} value={crud.current.a} onChange={(e) => crud.update({ a: e.target.value })} placeholder="e.g. BSc Computer Science" /></Field>
+            <Field label="Institution"><input className={inputCls} value={crud.current.b} onChange={(e) => crud.update({ b: e.target.value })} placeholder="e.g. MIT" /></Field>
+            <Field label="Year / Period"><input className={inputCls} value={crud.current.c} onChange={(e) => crud.update({ c: e.target.value })} placeholder="e.g. 2020 — 2024" /></Field>
+            <Field label="Description"><textarea rows={3} className={inputCls} value={getDesc(crud.current.d)} onChange={(e) => crud.update({ d: packD(e.target.value, getPct(crud.current.d)) })} placeholder="What did you study?" /></Field>
+            <Field label={`Grade / Percentage: ${getPct(crud.current.d) || "0"}%`}>
+              <input type="range" min={0} max={100} value={getPct(crud.current.d) || "0"} onChange={(e) => crud.update({ d: packD(getDesc(crud.current.d), e.target.value) })} className="w-full accent-primary" />
+              <div className="flex justify-between text-xs text-on-surface-variant mt-1"><span>0%</span><span className="text-primary font-bold">{getPct(crud.current.d) || "0"}%</span><span>100%</span></div>
+            </Field>
+          </div>
+        ))}
+      </Modal>
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.a || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
+    </>
+  );
+}
+
+/* ============== Freelancing (was Services) ============== */
+type FreelancingService = { id?: number | string; icon: string; title: string; desc: string; price: string; visible: boolean };
+
+function FreelancingEditor() {
+  const crud = useBackendCrud({
+    list: adminApi.listServices,
+    create: adminApi.createService,
+    update: adminApi.updateService,
+    remove: adminApi.deleteService,
+  });
+  const blank: FreelancingService = { icon: "handshake", title: "", desc: "", price: "", visible: true };
+
+  const CATEGORIES = [
+    { value: "code",          label: "Web Development" },
+    { value: "view_in_ar",    label: "3D / WebGL" },
+    { value: "palette",       label: "UI/UX Design" },
+    { value: "phone_android", label: "Mobile App" },
+    { value: "api",           label: "API / Backend" },
+    { value: "cloud",         label: "DevOps / Cloud" },
+    { value: "edit",          label: "Content Writing" },
+    { value: "brush",         label: "Graphic Design" },
+    { value: "analytics",     label: "Data / Analytics" },
+    { value: "handshake",     label: "Consulting" },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title="Freelancing"
+        subtitle="Manage the services you offer to freelance clients."
+        action={
+          <button onClick={() => crud.open("create", blank)} className="bg-primary text-on-primary font-bold px-5 py-3 rounded-full glow-primary flex items-center gap-2">
+            <Icon name="add" className="text-[18px]" /> Add Service
+          </button>
+        }
+      />
+      <div className="grid md:grid-cols-2 gap-6">
+        {crud.items.map((s) => (
+          <div key={s.id} className="glass-panel rounded-3xl p-6 flex gap-5">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0"><Icon name={s.icon} fill /></div>
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between items-start gap-3 mb-1">
+                <h3 className="font-bold text-on-surface">{s.title}</h3>
+                <div className="flex items-center gap-2">
+                  {!s.visible && <span className="text-[10px] uppercase font-bold bg-white/10 text-on-surface-variant px-2 py-0.5 rounded-full">Hidden</span>}
+                  <span className="text-[10px] uppercase font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full">Freelance</span>
+                </div>
+              </div>
+              <p className="text-sm text-on-surface-variant opacity-70 mb-2">{s.desc}</p>
+              <p className="text-xs text-primary font-bold mb-3">{s.price}</p>
+              <RowActions onView={() => crud.open("view", s)} onEdit={() => crud.open("edit", s)} onDelete={() => crud.setConfirm(s)} />
+            </div>
+          </div>
+        ))}
+        {crud.items.length === 0 && (
+          <div className="md:col-span-2 glass-panel rounded-3xl p-10 text-center text-on-surface-variant opacity-60">
+            No freelancing services yet. Click <b className="text-primary">Add Service</b> to create one.
+          </div>
+        )}
+      </div>
+
+      <Modal open={crud.mode !== null} onClose={crud.close} mode={crud.mode} icon="handshake"
+        title={crud.mode === "view" ? "Service Details" : crud.mode === "edit" ? "Edit Freelancing Service" : "New Freelancing Service"}
+        footer={<ModalFooter mode={crud.mode} onClose={crud.close} onSave={() => void crud.save()} saving={crud.saving} />}>
+        {crud.current && (crud.mode === "view" ? (
+          <div className="grid grid-cols-2 gap-5">
+            <DetailRow label="Title" value={crud.current.title} />
+            <DetailRow label="Icon" value={crud.current.icon} />
+            <DetailRow label="Starting Price" value={crud.current.price} />
+            <DetailRow label="Visible" value={crud.current.visible ? "Yes" : "No"} />
+            <DetailRow label="Description" value={crud.current.desc} full />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <Field label="Service Title"><input className={inputCls} value={crud.current.title} onChange={(e) => crud.update({ title: e.target.value })} placeholder="e.g. Full Stack Web App" /></Field>
+            <Field label="Service Type / Icon">
+              <select className={inputCls} value={crud.current.icon} onChange={(e) => crud.update({ icon: e.target.value })}>
+                {CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Description"><textarea rows={3} className={inputCls} value={crud.current.desc} onChange={(e) => crud.update({ desc: e.target.value })} placeholder="What's included in this service?" /></Field>
+            <Field label="Starting Price"><input className={inputCls} value={crud.current.price} onChange={(e) => crud.update({ price: e.target.value })} placeholder="e.g. from $2,500 or $50/hr" /></Field>
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] cursor-pointer">
+              <input type="checkbox" checked={crud.current.visible} onChange={(e) => crud.update({ visible: e.target.checked })} className="accent-primary w-4 h-4" />
+              <span className="text-sm text-on-surface">Show on the public site</span>
+            </label>
+          </div>
+        ))}
+      </Modal>
+      <ConfirmDelete open={!!crud.confirm} onClose={() => crud.setConfirm(null)} onConfirm={() => crud.confirm && void crud.remove(crud.confirm)} name={crud.confirm?.title || ""} />
+      {crud.loading && <p className="text-on-surface-variant text-sm mt-4">Loading...</p>}
+      {crud.error && <p className="text-error text-sm mt-4">{crud.error}</p>}
+    </>
+  );
+}
+
+/* ============== Services (kept for reference) ============== */
 type Service = { id?: number | string; icon: string; title: string; desc: string; price: string; visible: boolean };
 
 function ServicesEditor() {

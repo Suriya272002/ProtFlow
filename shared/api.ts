@@ -159,6 +159,18 @@ export interface CustomizationConfig {
   customHeadScripts: string;
 }
 
+
+export interface FooterConfig {
+  tagline: string;
+  copyrightName: string;
+  copyrightYear: string;
+  links: { label: string; url: string }[];
+  socialLinks: { icon: string; label: string; url: string }[];
+  showSocial: boolean;
+  showLinks: boolean;
+  showBackToTop: boolean;
+}
+
 export interface DashboardData {
   stats: { label: string; value: string; delta: string; icon: string }[];
   sections: { id: number; key: string; title: string; icon: string; subtitle: string; published: boolean }[];
