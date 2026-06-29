@@ -8,6 +8,7 @@ import {
   parseJsonField,
   updateSingleton,
 } from "./helpers";
+import nodemailer from "nodemailer";
 
 import multer from "multer";
 import path from "path";
@@ -454,8 +455,37 @@ router.put("/smtp", requireAuth, async (req, res) => {
   }
 });
 
+
 router.post("/smtp/test", requireAuth, async (req, res) => {
-  res.json({ ok: true, message: `Test email queued to ${req.body.to || "test@example.com"}` });
+  try {
+    const row = await getSingleton("smtp_config");
+    if (!row) {
+      res.status(400).json({ ok: false, error: "SMTP not configured" });
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: row.host,
+      port: Number(row.port),
+      secure: !!row.secure,
+      auth: {
+        user: row.username,
+        pass: row.password,
+      },
+    });
+
+    await transporter.sendMail({
+      from: `"${row.from_name}" <${row.from_email}>`,
+      to: req.body.to || "test@example.com",
+      subject: "Test Email from Plotflow",
+      text: "This is a test email. SMTP is working correctly!",
+    });
+
+    res.json({ ok: true, message: `Test email sent to ${req.body.to}` });
+
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 /* ── Appearance ── */
@@ -613,16 +643,47 @@ router.post("/contact", async (req, res) => {
       res.status(400).json({ error: "Name, email, and message required" });
       return;
     }
+
+    // Save to database
     const preview = body.slice(0, 100);
     await getDb()("messages").insert({
       name, email, subject: subject || "Contact form", body, preview, unread: true,
     });
+
+    // Send email notification
+    const smtp = await getSingleton("smtp_config");
+    if (smtp && smtp.host && smtp.username && smtp.password) {
+      const transporter = nodemailer.createTransport({
+        host: smtp.host,
+        port: Number(smtp.port),
+        secure: !!smtp.secure,
+        auth: {
+          user: smtp.username,
+          pass: smtp.password,
+        },
+      });
+
+      await transporter.sendMail({
+        from: `"${smtp.from_name}" <${smtp.from_email}>`,
+        to: smtp.from_email,
+        replyTo: email,
+        subject: `New Contact: ${subject || "Contact form"}`,
+        html: `
+          <h2>New message from your portfolio</h2>
+          <p><b>Name:</b> ${name}</p>
+          <p><b>Email:</b> ${email}</p>
+          <p><b>Subject:</b> ${subject || "Contact form"}</p>
+          <p><b>Message:</b></p>
+          <p>${body}</p>
+        `,
+      });
+    }
+
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
 });
-
 
 /* ── Footer ── */
 function mapFooter(row: Record<string, unknown>) {
